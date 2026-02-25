@@ -1,0 +1,34 @@
+zone_server:
+  ros__parameters:
+    zones_file: "config/zones.web.yaml"
+    use_sim_time: true
+    frame_id: "map"
+    marker_topic: "/zone_markers"
+    state_topic: "/zones_state"
+    set_topic: "/zones_cmd"
+    load_on_start: true
+    publish_markers: true
+    publish_state: true
+    state_publish_period_sec: 1.0
+    websocket_enabled: true
+    websocket_host: "0.0.0.0"
+    websocket_port: 8765
+    projection_enabled: true
+    from_ll_service: "/fromLL"
+    to_ll_service: "/toLL"
+    projection_request_timeout_sec: 10.0
+    publish_nav2_mask: true
+    nav2_mask_topic: "/keepout_filter_mask"
+    nav2_filter_info_topic: "/costmap_filter_info"
+    nav2_filter_type: 0
+    nav2_mask_base: 0.0
+    nav2_mask_multiplier: 1.0
+    mask_resolution: 0.1
+    mask_width: 400
+    mask_height: 400
+    mask_origin_x: -20.0
+    mask_origin_y: -20.0
+    mask_default_value: 0
+    mask_no_go_value: 100
+    mask_auto_resize: true
+    mask_auto_resize_margin_m: 2.0

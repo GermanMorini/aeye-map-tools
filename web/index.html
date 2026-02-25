@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>map_tools Zone Editor</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+  <style>
+    :root {
+      --bg: #0a0f1a;
+      --panel: #111827;
+      --line: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #22d3ee;
+      --good: #22c55e;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(circle at 20% 0%, #1b2742, var(--bg));
+      color: var(--text);
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 12px;
+      height: 100vh;
+      padding: 12px;
+    }
+    .panel {
+      background: linear-gradient(180deg, #0d1423, var(--panel));
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      overflow: auto;
+    }
+    .panel h2 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .stack { display: flex; flex-direction: column; gap: 8px; }
+    input, button, select, textarea {
+      font: inherit;
+      border-radius: 8px;
+      border: 1px solid #2d3a51;
+      background: #030712;
+      color: var(--text);
+      padding: 8px 10px;
+      width: 100%;
+    }
+    textarea { min-height: 120px; }
+    button {
+      cursor: pointer;
+      background: linear-gradient(180deg, #67e8f9, var(--accent));
+      color: #03202b;
+      border: 0;
+      font-weight: 700;
+      width: auto;
+    }
+    button.secondary {
+      background: #334155;
+      color: var(--text);
+      border: 1px solid #475569;
+      font-weight: 600;
+    }
+    .status { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .status.good { color: var(--good); }
+    .status.bad { color: var(--bad); }
+    #map {
+      width: 100%;
+      height: calc(100vh - 24px);
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .zone-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .zone-list li {
+      padding: 8px;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .zone-list li:last-child { border-bottom: 0; }
+    .badge { padding: 2px 6px; border-radius: 999px; font-size: 11px; }
+    .on { background: #14532d; color: #dcfce7; }
+    .off { background: #3f3f46; color: #e4e4e7; }
+    pre {
+      margin: 0;
+      max-height: 200px;
+      overflow: auto;
+      background: #020617;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    @media (max-width: 1080px) {
+      .layout { grid-template-columns: 1fr; height: auto; }
+      #map { height: 60vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="panel">
+      <h2>Connection</h2>
+      <div class="stack">
+        <input id="wsUrl" value="ws://127.0.0.1:8765" />
+        <div class="row">
+          <button id="connectBtn">Connect</button>
+          <button id="disconnectBtn" class="secondary">Disconnect</button>
+        </div>
+        <div id="status" class="status">Disconnected</div>
+      </div>
+
+      <h2>Zones</h2>
+      <div class="row">
+        <button id="refreshBtn" class="secondary">Refresh</button>
+        <button id="saveBtn" class="secondary">Save File</button>
+        <button id="loadBtn" class="secondary">Load File</button>
+      </div>
+      <div class="row">
+        <button id="pushBtn">Push To Server</button>
+        <button id="clearBtn" class="secondary">Clear All</button>
+      </div>
+      <div class="row">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+          <input id="autoSync" type="checkbox" checked style="width:auto;" /> Auto-sync edits
+        </label>
+      </div>
+      <ul id="zoneList" class="zone-list"></ul>
+
+      <h2>Current Document (map frame)</h2>
+      <textarea id="zonesJson" readonly></textarea>
+
+      <h2>Events</h2>
+      <pre id="events"></pre>
+    </div>
+
+    <div id="map"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <script>
+    const map = L.map('map', { zoomControl: true }).setView([-31.421785, -64.102448], 18);
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 22,
+      attribution: '&copy; OpenStreetMap contributors'
+    });
+    const satelliteLayer = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        maxZoom: 22,
+        attribution: 'Tiles &copy; Esri'
+      }
+    );
+    osmLayer.addTo(map);
+    L.control.layers(
+      {
+        'OpenStreetMap': osmLayer,
+        'Satellite (Esri)': satelliteLayer
+      },
+      {},
+      { collapsed: false }
+    ).addTo(map);
+
+    const drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+
+    const drawControl = new L.Control.Draw({
+      edit: {
+        featureGroup: drawnItems,
+        remove: true,
+      },
+      draw: {
+        polygon: {
+          allowIntersection: false,
+          showArea: true,
+          shapeOptions: { color: '#f97316', weight: 3 }
+        },
+        rectangle: false,
+        polyline: false,
+        circle: false,
+        circlemarker: false,
+        marker: false
+      }
+    });
+    map.addControl(drawControl);
+
+    const state = {
+      ws: null,
+      connected: false,
+      reqId: 1,
+      frameId: 'map',
+      seqZoneId: 1,
+      waitingMapToLl: new Map(),
+      lastDocument: { frame_id: 'map', zones: [] },
+      lastServerDocumentKey: '',
+      localDirty: false
+    };
+
+    function setStatus(text, ok = null) {
+      const s = document.getElementById('status');
+      s.textContent = text;
+      s.className = 'status';
+      if (ok === true) s.classList.add('good');
+      if (ok === false) s.classList.add('bad');
+    }
+
+    function logEvent(obj, dir = 'info') {
+      const pre = document.getElementById('events');
+      const text = typeof obj === 'string' ? obj : JSON.stringify(obj);
+      pre.textContent += `[${new Date().toISOString()}][${dir}] ${text}\n`;
+      pre.scrollTop = pre.scrollHeight;
+    }
+
+    function send(payload) {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        setStatus('WebSocket not connected', false);
+        return null;
+      }
+      if (!payload.id) {
+        payload.id = `req-${state.reqId++}`;
+      }
+      state.ws.send(JSON.stringify(payload));
+      logEvent(payload, 'tx');
+      return payload.id;
+    }
+
+    function connectWs() {
+      const url = document.getElementById('wsUrl').value.trim();
+      state.ws = new WebSocket(url);
+
+      state.ws.onopen = () => {
+        state.connected = true;
+        state.lastServerDocumentKey = '';
+        setStatus(`Connected to ${url}`, true);
+        send({ op: 'get_zones' });
+      };
+
+      state.ws.onclose = () => {
+        state.connected = false;
+        setStatus('Disconnected', false);
+      };
+
+      state.ws.onerror = () => {
+        setStatus('WebSocket error', false);
+      };
+
+      state.ws.onmessage = (ev) => {
+        let msg;
+        try {
+          msg = JSON.parse(ev.data);
+        } catch (err) {
+          logEvent(`invalid json from server: ${ev.data}`, 'rx');
+          return;
+        }
+        logEvent(msg, 'rx');
+        handleServerMessage(msg);
+      };
+    }
+
+    function disconnectWs() {
+      if (state.ws) {
+        state.ws.close();
+      }
+    }
+
+    function handleServerMessage(msg) {
+      if (msg.op === 'zones_state' && msg.document) {
+        if (state.localDirty) {
+          setStatus('Local edits pending. Server update ignored until sync.', false);
+          return;
+        }
+        const docKey = JSON.stringify(msg.document);
+        if (docKey === state.lastServerDocumentKey) {
+          return;
+        }
+        state.lastServerDocumentKey = docKey;
+        state.frameId = msg.document.frame_id || 'map';
+        state.lastDocument = msg.document;
+        renderMapFromDocument(msg.document);
+        renderDocumentTextarea(msg.document);
+        renderZoneList(msg.document);
+        return;
+      }
+
+      if (msg.op === 'projection_result' && msg.ok === true) {
+        const id = msg.id || '';
+        if (msg.request === 'map_to_ll' && state.waitingMapToLl.has(id)) {
+          const cb = state.waitingMapToLl.get(id);
+          state.waitingMapToLl.delete(id);
+          cb(msg.points || []);
+          return;
+        }
+      }
+
+      if (msg.op === 'result' && msg.ok === false) {
+        setStatus(`${msg.request}: ${msg.message}`, false);
+      }
+      if (msg.op === 'result' && msg.ok === true) {
+        if (msg.request === 'set_zones' || msg.request === 'set_zones_ll') {
+          state.localDirty = false;
+          send({ op: 'get_zones' });
+        }
+        setStatus(`${msg.request}: ${msg.message || 'ok'}`, true);
+      }
+    }
+
+    function newZoneId() {
+      const id = `zone_${state.seqZoneId}`;
+      state.seqZoneId += 1;
+      return id;
+    }
+
+    function makeLayerFromZone(zone, latLngs) {
+      const polygon = L.polygon(latLngs, {
+        color: zone.enabled ? '#f97316' : '#64748b',
+        weight: 3,
+        fillOpacity: zone.enabled ? 0.25 : 0.1
+      });
+      polygon.zoneMeta = {
+        id: zone.id,
+        type: zone.type || 'no_go',
+        enabled: zone.enabled !== false,
+      };
+      polygon.bindTooltip(zone.id, { permanent: false });
+      return polygon;
+    }
+
+    function renderMapFromDocument(doc) {
+      drawnItems.clearLayers();
+      const zones = Array.isArray(doc.zones) ? doc.zones : [];
+      if (zones.length === 0) {
+        renderZoneList(doc);
+        return;
+      }
+
+      zones.forEach((zone) => {
+        const points = Array.isArray(zone.polygon) ? zone.polygon : [];
+        if (points.length < 3) return;
+        const reqId = send({
+          op: 'map_to_ll',
+          id: `m2l-${zone.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          points: points.map((p) => ({ x: p[0], y: p[1], z: 0.0 }))
+        });
+        if (!reqId) return;
+
+        state.waitingMapToLl.set(reqId, (latLonPoints) => {
+          if (!Array.isArray(latLonPoints) || latLonPoints.length < 3) return;
+          const latLngs = latLonPoints.map((p) => [p.lat, p.lon]);
+          const layer = makeLayerFromZone(zone, latLngs);
+          drawnItems.addLayer(layer);
+          renderZoneList(buildDocumentFromLayersPreview());
+        });
+      });
+    }
+
+    function renderDocumentTextarea(doc) {
+      window.document.getElementById('zonesJson').value = JSON.stringify(doc, null, 2);
+    }
+
+    function renderZoneList(doc) {
+      const ul = window.document.getElementById('zoneList');
+      ul.innerHTML = '';
+      const zones = (doc && Array.isArray(doc.zones)) ? doc.zones : [];
+      zones.forEach((z) => {
+        const li = document.createElement('li');
+        const left = document.createElement('span');
+        left.textContent = `${z.id} (${z.type || 'no_go'})`;
+        const right = document.createElement('span');
+        right.className = `badge ${z.enabled === false ? 'off' : 'on'}`;
+        right.textContent = z.enabled === false ? 'disabled' : 'enabled';
+        li.appendChild(left);
+        li.appendChild(right);
+        ul.appendChild(li);
+      });
+    }
+
+    function buildDocumentFromLayersPreview() {
+      const zones = [];
+      drawnItems.eachLayer((layer) => {
+        const meta = layer.zoneMeta || { id: newZoneId(), type: 'no_go', enabled: true };
+        const latLngs = layer.getLatLngs()[0] || [];
+        zones.push({
+          id: meta.id,
+          type: meta.type || 'no_go',
+          enabled: meta.enabled !== false,
+          polygon: latLngs.map((ll) => [ll.lng, ll.lat]),
+        });
+      });
+      return { frame_id: state.frameId, zones };
+    }
+
+    function collectLatLonFromLayers() {
+      const zones = [];
+      drawnItems.eachLayer((layer) => {
+        const meta = layer.zoneMeta || { id: newZoneId(), type: 'no_go', enabled: true };
+        if (!meta.id) meta.id = newZoneId();
+
+        const latLngs = layer.getLatLngs()[0] || [];
+        const points = latLngs.map((ll) => ({ lat: ll.lat, lon: ll.lng, alt: 0.0 }));
+        if (points.length >= 3) {
+          zones.push({
+            id: meta.id,
+            type: meta.type || 'no_go',
+            enabled: meta.enabled !== false,
+            points,
+          });
+        }
+      });
+      return zones;
+    }
+
+    function pushLayersToServer() {
+      const zonesLatLon = collectLatLonFromLayers();
+      const doc = {
+        frame_id: state.frameId,
+        zones: zonesLatLon.map((z) => ({ id: z.id, type: z.type, enabled: z.enabled, points: z.points }))
+      };
+      state.localDirty = true;
+      renderDocumentTextarea(state.lastDocument);
+      renderZoneList(buildDocumentFromLayersPreview());
+      send({ op: 'set_zones_ll', document: doc });
+    }
+
+    map.on(L.Draw.Event.CREATED, (e) => {
+      const layer = e.layer;
+      layer.zoneMeta = { id: newZoneId(), type: 'no_go', enabled: true };
+      drawnItems.addLayer(layer);
+      state.localDirty = true;
+      renderZoneList(buildDocumentFromLayersPreview());
+      if (document.getElementById('autoSync').checked) {
+        pushLayersToServer();
+      }
+    });
+
+    map.on(L.Draw.Event.EDITED, () => {
+      state.localDirty = true;
+      renderZoneList(buildDocumentFromLayersPreview());
+      if (document.getElementById('autoSync').checked) {
+        pushLayersToServer();
+      }
+    });
+
+    map.on(L.Draw.Event.DELETED, () => {
+      state.localDirty = true;
+      renderZoneList(buildDocumentFromLayersPreview());
+      if (document.getElementById('autoSync').checked) {
+        pushLayersToServer();
+      }
+    });
+
+    drawnItems.on('click', (evt) => {
+      const layer = evt.layer;
+      if (!layer || !layer.zoneMeta) return;
+      const current = layer.zoneMeta;
+      const nextEnabled = window.confirm(`Toggle zone '${current.id}' enabled/disabled?\nOK=toggle, Cancel=no change`);
+      if (nextEnabled) {
+        current.enabled = !current.enabled;
+        state.localDirty = true;
+        layer.setStyle({ color: current.enabled ? '#f97316' : '#64748b', fillOpacity: current.enabled ? 0.25 : 0.1 });
+        renderZoneList(buildDocumentFromLayersPreview());
+        if (document.getElementById('autoSync').checked) {
+          pushLayersToServer();
+        }
+      }
+    });
+
+    document.getElementById('connectBtn').addEventListener('click', connectWs);
+    document.getElementById('disconnectBtn').addEventListener('click', disconnectWs);
+    document.getElementById('refreshBtn').addEventListener('click', () => send({ op: 'get_zones' }));
+    document.getElementById('pushBtn').addEventListener('click', pushLayersToServer);
+    document.getElementById('saveBtn').addEventListener('click', () => send({ op: 'save' }));
+    document.getElementById('loadBtn').addEventListener('click', () => send({ op: 'load' }));
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      drawnItems.clearLayers();
+      pushLayersToServer();
+    });
+
+    renderDocumentTextarea(state.lastDocument);
+    renderZoneList(state.lastDocument);
+  </script>
+</body>
+</html>
