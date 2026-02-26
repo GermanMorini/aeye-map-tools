@@ -13,12 +13,12 @@ setup(
             "share/ament_index/resource_index/packages",
             ["resource/" + package_name],
         ),
-        ("share/" + package_name, ["package.xml", "AGENTS.md"]),
+        ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "config"), glob("config/*")),
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
         (os.path.join("share", package_name, "web"), glob("web/*")),
     ],
-    install_requires=["setuptools", "PyYAML", "websockets"],
+    install_requires=["setuptools", "PyYAML", "websockets", "numpy"],
     zip_safe=True,
     maintainer="TODO",
     maintainer_email="todo@example.com",
@@ -27,7 +27,8 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "zone_server = map_tools.zone_server:main",
+            "zone_server = map_tools.web_zone_server:main",
+            "web_zone_server = map_tools.web_zone_server:main",
         ],
     },
 )

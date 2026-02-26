@@ -148,7 +148,7 @@
       </div>
       <ul id="zoneList" class="zone-list"></ul>
 
-      <h2>Current Document (map frame)</h2>
+      <h2>Current Document (lat/lon)</h2>
       <textarea id="zonesJson" readonly></textarea>
 
       <h2>Events</h2>
@@ -209,13 +209,10 @@
     const state = {
       ws: null,
       connected: false,
-      reqId: 1,
-      frameId: 'map',
       seqZoneId: 1,
-      waitingMapToLl: new Map(),
-      lastDocument: { frame_id: 'map', zones: [] },
-      lastServerDocumentKey: '',
-      localDirty: false
+      frameId: 'map',
+      lastZones: [],
+      robotMarker: null
     };
 
     function setStatus(text, ok = null) {
@@ -236,14 +233,10 @@
     function send(payload) {
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
         setStatus('WebSocket not connected', false);
-        return null;
-      }
-      if (!payload.id) {
-        payload.id = `req-${state.reqId++}`;
+        return;
       }
       state.ws.send(JSON.stringify(payload));
       logEvent(payload, 'tx');
-      return payload.id;
     }
 
     function connectWs() {
@@ -252,9 +245,8 @@
 
       state.ws.onopen = () => {
         state.connected = true;
-        state.lastServerDocumentKey = '';
         setStatus(`Connected to ${url}`, true);
-        send({ op: 'get_zones' });
+        send({ op: 'get_state' });
       };
 
       state.ws.onclose = () => {
@@ -286,43 +278,58 @@
     }
 
     function handleServerMessage(msg) {
-      if (msg.op === 'zones_state' && msg.document) {
-        if (state.localDirty) {
-          setStatus('Local edits pending. Server update ignored until sync.', false);
-          return;
-        }
-        const docKey = JSON.stringify(msg.document);
-        if (docKey === state.lastServerDocumentKey) {
-          return;
-        }
-        state.lastServerDocumentKey = docKey;
-        state.frameId = msg.document.frame_id || 'map';
-        state.lastDocument = msg.document;
-        renderMapFromDocument(msg.document);
-        renderDocumentTextarea(msg.document);
-        renderZoneList(msg.document);
+      if (msg.op === 'state' && msg.ok === true) {
+        state.frameId = msg.frame_id || 'map';
+        const zones = Array.isArray(msg.zones) ? msg.zones : [];
+        state.lastZones = zones;
+        renderMapFromZones(zones);
+        updateRobotPose(msg.robot_pose || null);
+        renderDocumentTextarea({ frame_id: state.frameId, zones });
+        renderZoneList({ zones });
+        const maskSource = msg.mask_source || 'map';
+        const maskReady = msg.mask_ready === true;
+        const maskReadyText = maskReady ? 'mask ready' : 'mask not ready';
+        setStatus(`state updated (${maskReadyText}, source=${maskSource})`, maskReady);
         return;
       }
 
-      if (msg.op === 'projection_result' && msg.ok === true) {
-        const id = msg.id || '';
-        if (msg.request === 'map_to_ll' && state.waitingMapToLl.has(id)) {
-          const cb = state.waitingMapToLl.get(id);
-          state.waitingMapToLl.delete(id);
-          cb(msg.points || []);
-          return;
-        }
+      if (msg.op === 'robot_pose') {
+        updateRobotPose(msg.pose || null);
+        return;
       }
 
-      if (msg.op === 'result' && msg.ok === false) {
-        setStatus(`${msg.request}: ${msg.message}`, false);
-      }
-      if (msg.op === 'result' && msg.ok === true) {
-        if (msg.request === 'set_zones' || msg.request === 'set_zones_ll') {
-          state.localDirty = false;
-          send({ op: 'get_zones' });
+      if (msg.op === 'ack') {
+        if (msg.ok) {
+          const published = msg.published ? 'published' : 'not published';
+          setStatus(`${msg.request || 'request'} ok (${published})`, msg.published);
+          send({ op: 'get_state' });
+        } else {
+          setStatus(`${msg.request || 'request'} failed: ${msg.error || 'error'}`, false);
         }
-        setStatus(`${msg.request}: ${msg.message || 'ok'}`, true);
+      }
+    }
+
+    function updateRobotPose(pose) {
+      const hasPose = pose && Number.isFinite(pose.lat) && Number.isFinite(pose.lon);
+      if (!hasPose) {
+        if (state.robotMarker) {
+          map.removeLayer(state.robotMarker);
+          state.robotMarker = null;
+        }
+        return;
+      }
+
+      const latLng = [pose.lat, pose.lon];
+      if (!state.robotMarker) {
+        state.robotMarker = L.circleMarker(latLng, {
+          radius: 8,
+          color: '#0ea5e9',
+          fillColor: '#38bdf8',
+          fillOpacity: 0.9,
+          weight: 2
+        }).addTo(map);
+      } else {
+        state.robotMarker.setLatLng(latLng);
       }
     }
 
@@ -347,31 +354,19 @@
       return polygon;
     }
 
-    function renderMapFromDocument(doc) {
+    function renderMapFromZones(zones) {
       drawnItems.clearLayers();
-      const zones = Array.isArray(doc.zones) ? doc.zones : [];
       if (zones.length === 0) {
-        renderZoneList(doc);
+        renderZoneList({ zones: [] });
         return;
       }
 
       zones.forEach((zone) => {
-        const points = Array.isArray(zone.polygon) ? zone.polygon : [];
-        if (points.length < 3) return;
-        const reqId = send({
-          op: 'map_to_ll',
-          id: `m2l-${zone.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          points: points.map((p) => ({ x: p[0], y: p[1], z: 0.0 }))
-        });
-        if (!reqId) return;
-
-        state.waitingMapToLl.set(reqId, (latLonPoints) => {
-          if (!Array.isArray(latLonPoints) || latLonPoints.length < 3) return;
-          const latLngs = latLonPoints.map((p) => [p.lat, p.lon]);
-          const layer = makeLayerFromZone(zone, latLngs);
-          drawnItems.addLayer(layer);
-          renderZoneList(buildDocumentFromLayersPreview());
-        });
+        const polygon = Array.isArray(zone.polygon) ? zone.polygon : [];
+        if (polygon.length < 3) return;
+        const latLngs = polygon.map((p) => [p.lat, p.lon]);
+        const layer = makeLayerFromZone(zone, latLngs);
+        drawnItems.addLayer(layer);
       });
     }
 
@@ -396,7 +391,7 @@
       });
     }
 
-    function buildDocumentFromLayersPreview() {
+    function buildPreviewDocument() {
       const zones = [];
       drawnItems.eachLayer((layer) => {
         const meta = layer.zoneMeta || { id: newZoneId(), type: 'no_go', enabled: true };
@@ -405,26 +400,26 @@
           id: meta.id,
           type: meta.type || 'no_go',
           enabled: meta.enabled !== false,
-          polygon: latLngs.map((ll) => [ll.lng, ll.lat]),
+          polygon: latLngs.map((ll) => ({ lat: ll.lat, lon: ll.lng })),
         });
       });
-      return { frame_id: state.frameId, zones };
+      return { frame_id: state.frameId, zones: zones };
     }
 
-    function collectLatLonFromLayers() {
+    function collectZonesFromLayers() {
       const zones = [];
       drawnItems.eachLayer((layer) => {
         const meta = layer.zoneMeta || { id: newZoneId(), type: 'no_go', enabled: true };
         if (!meta.id) meta.id = newZoneId();
 
         const latLngs = layer.getLatLngs()[0] || [];
-        const points = latLngs.map((ll) => ({ lat: ll.lat, lon: ll.lng, alt: 0.0 }));
-        if (points.length >= 3) {
+        const polygon = latLngs.map((ll) => ({ lat: ll.lat, lon: ll.lng }));
+        if (polygon.length >= 3) {
           zones.push({
             id: meta.id,
             type: meta.type || 'no_go',
             enabled: meta.enabled !== false,
-            points,
+            polygon,
           });
         }
       });
@@ -432,39 +427,31 @@
     }
 
     function pushLayersToServer() {
-      const zonesLatLon = collectLatLonFromLayers();
-      const doc = {
-        frame_id: state.frameId,
-        zones: zonesLatLon.map((z) => ({ id: z.id, type: z.type, enabled: z.enabled, points: z.points }))
-      };
-      state.localDirty = true;
-      renderDocumentTextarea(state.lastDocument);
-      renderZoneList(buildDocumentFromLayersPreview());
-      send({ op: 'set_zones_ll', document: doc });
+      const zones = collectZonesFromLayers();
+      renderDocumentTextarea({ frame_id: state.frameId, zones });
+      renderZoneList({ zones });
+      send({ op: 'set_zones_ll', zones });
     }
 
     map.on(L.Draw.Event.CREATED, (e) => {
       const layer = e.layer;
       layer.zoneMeta = { id: newZoneId(), type: 'no_go', enabled: true };
       drawnItems.addLayer(layer);
-      state.localDirty = true;
-      renderZoneList(buildDocumentFromLayersPreview());
+      renderZoneList(buildPreviewDocument());
       if (document.getElementById('autoSync').checked) {
         pushLayersToServer();
       }
     });
 
-    map.on(L.Draw.Event.EDITED, () => {
-      state.localDirty = true;
-      renderZoneList(buildDocumentFromLayersPreview());
+    map.on(L.Draw.Event.EDITED, (e) => {
+      renderZoneList(buildPreviewDocument());
       if (document.getElementById('autoSync').checked) {
         pushLayersToServer();
       }
     });
 
-    map.on(L.Draw.Event.DELETED, () => {
-      state.localDirty = true;
-      renderZoneList(buildDocumentFromLayersPreview());
+    map.on(L.Draw.Event.DELETED, (e) => {
+      renderZoneList(buildPreviewDocument());
       if (document.getElementById('autoSync').checked) {
         pushLayersToServer();
       }
@@ -477,9 +464,8 @@
       const nextEnabled = window.confirm(`Toggle zone '${current.id}' enabled/disabled?\nOK=toggle, Cancel=no change`);
       if (nextEnabled) {
         current.enabled = !current.enabled;
-        state.localDirty = true;
         layer.setStyle({ color: current.enabled ? '#f97316' : '#64748b', fillOpacity: current.enabled ? 0.25 : 0.1 });
-        renderZoneList(buildDocumentFromLayersPreview());
+        renderZoneList(buildPreviewDocument());
         if (document.getElementById('autoSync').checked) {
           pushLayersToServer();
         }
@@ -488,17 +474,17 @@
 
     document.getElementById('connectBtn').addEventListener('click', connectWs);
     document.getElementById('disconnectBtn').addEventListener('click', disconnectWs);
-    document.getElementById('refreshBtn').addEventListener('click', () => send({ op: 'get_zones' }));
+    document.getElementById('refreshBtn').addEventListener('click', () => send({ op: 'get_state' }));
     document.getElementById('pushBtn').addEventListener('click', pushLayersToServer);
-    document.getElementById('saveBtn').addEventListener('click', () => send({ op: 'save' }));
-    document.getElementById('loadBtn').addEventListener('click', () => send({ op: 'load' }));
+    document.getElementById('saveBtn').addEventListener('click', pushLayersToServer);
+    document.getElementById('loadBtn').addEventListener('click', () => send({ op: 'get_state' }));
     document.getElementById('clearBtn').addEventListener('click', () => {
       drawnItems.clearLayers();
       pushLayersToServer();
     });
 
-    renderDocumentTextarea(state.lastDocument);
-    renderZoneList(state.lastDocument);
+    renderDocumentTextarea({ frame_id: state.frameId, zones: state.lastZones });
+    renderZoneList({ zones: state.lastZones });
   </script>
 </body>
 </html>
