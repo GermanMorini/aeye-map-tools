@@ -12,7 +12,7 @@ import rclpy
 import websockets
 import yaml
 from geographic_msgs.msg import GeoPoint
-from geometry_msgs.msg import PoseStamped, Quaternion
+from geometry_msgs.msg import PoseStamped, Quaternion, Twist
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.msg import CostmapFilterInfo
 from nav2_msgs.srv import GetCostmap
@@ -43,6 +43,9 @@ class WebZoneServerNode(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("gps_broadcast_hz", 1.0)
+        self.declare_parameter("brake_topic", "/cmd_vel_safe")
+        self.declare_parameter("brake_publish_count", 5)
+        self.declare_parameter("brake_publish_interval_s", 0.1)
         self.declare_parameter("zones_file", "")
 
         self.ws_host = str(self.get_parameter("ws_host").value)
@@ -56,6 +59,11 @@ class WebZoneServerNode(Node):
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.gps_broadcast_hz = float(self.get_parameter("gps_broadcast_hz").value)
+        self.brake_topic = str(self.get_parameter("brake_topic").value)
+        self.brake_publish_count = max(1, int(self.get_parameter("brake_publish_count").value))
+        self.brake_publish_interval_s = max(
+            0.0, float(self.get_parameter("brake_publish_interval_s").value)
+        )
         self.zones_file = self._resolve_zones_file(str(self.get_parameter("zones_file").value))
 
         self._lock = threading.Lock()
@@ -80,6 +88,7 @@ class WebZoneServerNode(Node):
         self._filter_info_pub = self.create_publisher(
             CostmapFilterInfo, self.filter_info_topic, latched_qos
         )
+        self._brake_pub = self.create_publisher(Twist, self.brake_topic, 10)
         self._gps_sub = self.create_subscription(
             NavSatFix, self.gps_topic, self._on_gps_fix, 10
         )
@@ -239,6 +248,28 @@ class WebZoneServerNode(Node):
 
         self._current_goal_handle = None
         return True, "cancelled"
+
+    def apply_brake(self) -> Tuple[bool, str]:
+        """Cancel the current goal if present and publish zero velocity commands."""
+        cancel_ok = True
+        cancel_msg = "no active goal"
+        if self._current_goal_handle is not None:
+            cancel_ok, cancel_msg = self.cancel_current_goal()
+
+        stop_cmd = Twist()
+        for index in range(self.brake_publish_count):
+            self._brake_pub.publish(stop_cmd)
+            if index + 1 < self.brake_publish_count and self.brake_publish_interval_s > 0.0:
+                time.sleep(self.brake_publish_interval_s)
+
+        self.get_logger().warning(
+            f"Brake command sent on {self.brake_topic} "
+            f"({self.brake_publish_count} messages, cancel={cancel_msg})"
+        )
+
+        if cancel_ok:
+            return True, "brake applied"
+        return False, f"brake applied, but goal cancel failed: {cancel_msg}"
 
     def _get_global_costmap(self) -> Optional[Any]:
         if not self._global_costmap_client.wait_for_service(timeout_sec=2.0):
@@ -481,6 +512,18 @@ class WebSocketApi:
                     "ok": ok,
                     "request": "cancel_goal",
                     "error": None if ok else err
+                })
+            )
+            return
+
+        if op == "brake":
+            ok, err = await asyncio.to_thread(self.node.apply_brake)
+            await ws.send(
+                json.dumps({
+                    "op": "ack",
+                    "ok": ok,
+                    "request": "brake",
+                    "error": None if ok else err,
                 })
             )
             return

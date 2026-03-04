@@ -74,6 +74,12 @@
       border-color: #991b1b;
       color: #fecaca;
     }
+    button.danger {
+      background: linear-gradient(180deg, #ef4444, #b91c1c);
+      color: #fef2f2;
+      border: 1px solid #7f1d1d;
+      font-weight: 700;
+    }
     .status { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
     .status.good { color: var(--good); }
     .status.bad { color: var(--bad); }
@@ -158,6 +164,9 @@
         <div class="row">
           <button id="goalModeBtn" class="secondary">Set Goal (click map)</button>
           <button id="cancelGoalBtn" class="secondary">Cancel Goal</button>
+        </div>
+        <div class="row">
+          <button id="brakeBtn" class="danger">Brake Now</button>
         </div>
         <div id="goalStatus" class="status">No active goal</div>
       </div>
@@ -322,8 +331,8 @@
       }
 
       if (msg.op === 'ack') {
+        const goalStatusEl = document.getElementById('goalStatus');
         if (msg.request === 'set_goal_ll') {
-          const goalStatusEl = document.getElementById('goalStatus');
           if (msg.ok) {
             goalStatusEl.textContent = 'Goal sent — navigating...';
             goalStatusEl.className = 'status good';
@@ -332,7 +341,6 @@
             goalStatusEl.className = 'status bad';
           }
         } else if (msg.request === 'cancel_goal') {
-          const goalStatusEl = document.getElementById('goalStatus');
           if (msg.ok) {
             goalStatusEl.textContent = 'Goal cancelled';
             goalStatusEl.className = 'status';
@@ -342,6 +350,18 @@
             }
           } else {
             goalStatusEl.textContent = `Cancel failed: ${msg.error || 'error'}`;
+            goalStatusEl.className = 'status bad';
+          }
+        } else if (msg.request === 'brake') {
+          if (msg.ok) {
+            goalStatusEl.textContent = 'Brake applied';
+            goalStatusEl.className = 'status bad';
+            if (state.goalMarker) {
+              map.removeLayer(state.goalMarker);
+              state.goalMarker = null;
+            }
+          } else {
+            goalStatusEl.textContent = `Brake failed: ${msg.error || 'error'}`;
             goalStatusEl.className = 'status bad';
           }
         } else {
@@ -546,6 +566,10 @@
 
     document.getElementById('cancelGoalBtn').addEventListener('click', () => {
       send({ op: 'cancel_goal' });
+    });
+
+    document.getElementById('brakeBtn').addEventListener('click', () => {
+      send({ op: 'brake' });
     });
 
     map.on('click', (e) => {
