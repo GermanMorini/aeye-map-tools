@@ -35,7 +35,7 @@ class WebZoneServerNode(Node):
         self._loop = loop
 
         self.declare_parameter("ws_host", "0.0.0.0")
-        self.declare_parameter("ws_port", 8765)
+        self.declare_parameter("ws_port", 8766)
         self.declare_parameter("fromll_service", "/fromLL")
         self.declare_parameter("global_costmap_service", "/global_costmap/get_costmap")
         self.declare_parameter("mask_topic", "/keepout_filter_mask")

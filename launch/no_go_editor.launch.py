@@ -14,7 +14,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("ws_host", default_value="0.0.0.0"),
-            DeclareLaunchArgument("ws_port", default_value="8765"),
+            DeclareLaunchArgument("ws_port", default_value="8766"),
             DeclareLaunchArgument("fromll_service", default_value="/fromLL"),
             DeclareLaunchArgument(
                 "global_costmap_service", default_value="/global_costmap/get_costmap"
