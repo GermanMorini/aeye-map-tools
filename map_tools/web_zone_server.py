@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import threading
 import time
 from pathlib import Path
@@ -11,9 +12,12 @@ import rclpy
 import websockets
 import yaml
 from geographic_msgs.msg import GeoPoint
+from geometry_msgs.msg import PoseStamped, Quaternion
+from nav2_msgs.action import NavigateToPose
 from nav2_msgs.msg import CostmapFilterInfo
 from nav2_msgs.srv import GetCostmap
 from nav_msgs.msg import OccupancyGrid
+from rclpy.action import ActionClient
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import (
@@ -38,6 +42,7 @@ class WebZoneServerNode(Node):
         self.declare_parameter("filter_info_topic", "/costmap_filter_info")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("gps_topic", "/gps/fix")
+        self.declare_parameter("gps_broadcast_hz", 1.0)
         self.declare_parameter("zones_file", "")
 
         self.ws_host = str(self.get_parameter("ws_host").value)
@@ -50,6 +55,7 @@ class WebZoneServerNode(Node):
         self.filter_info_topic = str(self.get_parameter("filter_info_topic").value)
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.gps_topic = str(self.get_parameter("gps_topic").value)
+        self.gps_broadcast_hz = float(self.get_parameter("gps_broadcast_hz").value)
         self.zones_file = self._resolve_zones_file(str(self.get_parameter("zones_file").value))
 
         self._lock = threading.Lock()
@@ -59,6 +65,7 @@ class WebZoneServerNode(Node):
         self._mask_ready = False
         self._mask_source = "none"
         self._last_robot_pose: Optional[Dict[str, float]] = None
+        self._last_gps_broadcast_monotonic: Optional[float] = None
 
         self._fromll_client = self.create_client(FromLL, self.fromll_service)
         self._global_costmap_client = self.create_client(
@@ -76,6 +83,10 @@ class WebZoneServerNode(Node):
         self._gps_sub = self.create_subscription(
             NavSatFix, self.gps_topic, self._on_gps_fix, 10
         )
+
+        # Nav2 NavigateToPose action client
+        self._nav2_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
+        self._current_goal_handle = None
 
         self._publish_filter_info()
 
@@ -113,6 +124,16 @@ class WebZoneServerNode(Node):
         }
         with self._lock:
             self._last_robot_pose = pose
+            last_sent = self._last_gps_broadcast_monotonic
+
+        min_interval = 1.0 / max(0.1, float(self.gps_broadcast_hz))
+        now = time.monotonic()
+        if last_sent is not None and (now - last_sent) < min_interval:
+            return
+
+        with self._lock:
+            self._last_gps_broadcast_monotonic = now
+
         payload = {"op": "robot_pose", "pose": pose}
         asyncio.run_coroutine_threadsafe(self._broadcast(payload), self._loop)
 
@@ -161,6 +182,63 @@ class WebZoneServerNode(Node):
         if res is None:
             return None
         return (float(res.map_point.x), float(res.map_point.y), float(res.map_point.z))
+
+    def _yaw_to_quaternion(self, yaw_deg: float) -> Quaternion:
+        """Convert yaw angle in degrees to quaternion (z-axis rotation only)."""
+        yaw_rad = math.radians(yaw_deg)
+        half_yaw = yaw_rad / 2.0
+        qz = math.sin(half_yaw)
+        qw = math.cos(half_yaw)
+        return Quaternion(x=0.0, y=0.0, z=qz, w=qw)
+
+    def send_nav2_goal(self, lat: float, lon: float, yaw_deg: float = 0.0) -> Tuple[bool, str]:
+        """Send a NavigateToPose goal to Nav2."""
+        # Convert lat/lon to map frame
+        converted = self._call_from_ll(lat, lon)
+        if converted is None:
+            return False, "fromLL conversion failed"
+        x, y, _ = converted
+
+        # Build PoseStamped
+        pose = PoseStamped()
+        pose.header.frame_id = self.map_frame
+        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.pose.position.x = x
+        pose.pose.position.y = y
+        pose.pose.position.z = 0.0
+        pose.pose.orientation = self._yaw_to_quaternion(yaw_deg)
+
+        # Send goal
+        goal = NavigateToPose.Goal()
+        goal.pose = pose
+
+        # Wait for action server
+        if not self._nav2_client.wait_for_server(timeout_sec=2.0):
+            return False, "NavigateToPose action server not available"
+
+        future = self._nav2_client.send_goal_async(goal)
+        goal_handle = self._wait_for_future(future, timeout_sec=5.0)
+        if goal_handle is None:
+            return False, "failed to send goal"
+
+        if not goal_handle.accepted:
+            return False, "goal rejected by Nav2"
+
+        self._current_goal_handle = goal_handle
+        return True, "goal accepted"
+
+    def cancel_current_goal(self) -> Tuple[bool, str]:
+        """Cancel the current Nav2 goal."""
+        if self._current_goal_handle is None:
+            return False, "no active goal"
+
+        future = self._current_goal_handle.cancel_goal_async()
+        result = self._wait_for_future(future, timeout_sec=2.0)
+        if result is None:
+            return False, "timeout cancelling goal"
+
+        self._current_goal_handle = None
+        return True, "cancelled"
 
     def _get_global_costmap(self) -> Optional[Any]:
         if not self._global_costmap_client.wait_for_service(timeout_sec=2.0):
@@ -367,6 +445,44 @@ class WebSocketApi:
         op = msg.get("op")
         if op == "get_state":
             await ws.send(json.dumps(self.node.snapshot_state()))
+            return
+
+        if op == "set_goal_ll":
+            try:
+                lat = float(msg["lat"])
+                lon = float(msg["lon"])
+                yaw = float(msg.get("yaw_deg", 0.0))
+            except (KeyError, ValueError, TypeError) as e:
+                await ws.send(
+                    json.dumps({
+                        "op": "ack",
+                        "ok": False,
+                        "request": "set_goal_ll",
+                        "error": f"invalid parameters: {str(e)}"
+                    })
+                )
+                return
+            ok, err = await asyncio.to_thread(self.node.send_nav2_goal, lat, lon, yaw)
+            await ws.send(
+                json.dumps({
+                    "op": "ack",
+                    "ok": ok,
+                    "request": "set_goal_ll",
+                    "error": None if ok else err
+                })
+            )
+            return
+
+        if op == "cancel_goal":
+            ok, err = await asyncio.to_thread(self.node.cancel_current_goal)
+            await ws.send(
+                json.dumps({
+                    "op": "ack",
+                    "ok": ok,
+                    "request": "cancel_goal",
+                    "error": None if ok else err
+                })
+            )
             return
 
         if op == "set_zones_ll":

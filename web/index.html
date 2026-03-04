@@ -69,6 +69,11 @@
       border: 1px solid #475569;
       font-weight: 600;
     }
+    button.secondary.active {
+      background: #dc2626;
+      border-color: #991b1b;
+      color: #fecaca;
+    }
     .status { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
     .status.good { color: var(--good); }
     .status.bad { color: var(--bad); }
@@ -148,6 +153,15 @@
       </div>
       <ul id="zoneList" class="zone-list"></ul>
 
+      <h2>Navigation</h2>
+      <div class="stack">
+        <div class="row">
+          <button id="goalModeBtn" class="secondary">Set Goal (click map)</button>
+          <button id="cancelGoalBtn" class="secondary">Cancel Goal</button>
+        </div>
+        <div id="goalStatus" class="status">No active goal</div>
+      </div>
+
       <h2>Current Document (lat/lon)</h2>
       <textarea id="zonesJson" readonly></textarea>
 
@@ -212,8 +226,17 @@
       seqZoneId: 1,
       frameId: 'map',
       lastZones: [],
-      robotMarker: null
+      robotMarker: null,
+      goalMode: false,
+      goalMarker: null
     };
+
+    const goalIcon = L.divIcon({
+      className: '',
+      html: '<div style="width:14px;height:14px;background:#ef4444;border:2px solid #fff;border-radius:50%;"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7]
+    });
 
     function setStatus(text, ok = null) {
       const s = document.getElementById('status');
@@ -299,12 +322,36 @@
       }
 
       if (msg.op === 'ack') {
-        if (msg.ok) {
-          const published = msg.published ? 'published' : 'not published';
-          setStatus(`${msg.request || 'request'} ok (${published})`, msg.published);
-          send({ op: 'get_state' });
+        if (msg.request === 'set_goal_ll') {
+          const goalStatusEl = document.getElementById('goalStatus');
+          if (msg.ok) {
+            goalStatusEl.textContent = 'Goal sent — navigating...';
+            goalStatusEl.className = 'status good';
+          } else {
+            goalStatusEl.textContent = `Goal failed: ${msg.error || 'error'}`;
+            goalStatusEl.className = 'status bad';
+          }
+        } else if (msg.request === 'cancel_goal') {
+          const goalStatusEl = document.getElementById('goalStatus');
+          if (msg.ok) {
+            goalStatusEl.textContent = 'Goal cancelled';
+            goalStatusEl.className = 'status';
+            if (state.goalMarker) {
+              map.removeLayer(state.goalMarker);
+              state.goalMarker = null;
+            }
+          } else {
+            goalStatusEl.textContent = `Cancel failed: ${msg.error || 'error'}`;
+            goalStatusEl.className = 'status bad';
+          }
         } else {
-          setStatus(`${msg.request || 'request'} failed: ${msg.error || 'error'}`, false);
+          if (msg.ok) {
+            const published = msg.published ? 'published' : 'not published';
+            setStatus(`${msg.request || 'request'} ok (${published})`, msg.published);
+            send({ op: 'get_state' });
+          } else {
+            setStatus(`${msg.request || 'request'} failed: ${msg.error || 'error'}`, false);
+          }
         }
       }
     }
@@ -481,6 +528,43 @@
     document.getElementById('clearBtn').addEventListener('click', () => {
       drawnItems.clearLayers();
       pushLayersToServer();
+    });
+
+    document.getElementById('goalModeBtn').addEventListener('click', () => {
+      state.goalMode = !state.goalMode;
+      const btn = document.getElementById('goalModeBtn');
+      if (state.goalMode) {
+        btn.textContent = 'Set Goal (click map) — ACTIVE';
+        btn.classList.add('active');
+        map.getContainer().style.cursor = 'crosshair';
+      } else {
+        btn.textContent = 'Set Goal (click map)';
+        btn.classList.remove('active');
+        map.getContainer().style.cursor = '';
+      }
+    });
+
+    document.getElementById('cancelGoalBtn').addEventListener('click', () => {
+      send({ op: 'cancel_goal' });
+    });
+
+    map.on('click', (e) => {
+      if (!state.goalMode) return;
+      const { lat, lng } = e.latlng;
+
+      // Show marker on map
+      if (state.goalMarker) map.removeLayer(state.goalMarker);
+      state.goalMarker = L.marker([lat, lng], { icon: goalIcon }).addTo(map);
+
+      // Send to server
+      send({ op: 'set_goal_ll', lat, lon: lng, yaw_deg: 0 });
+
+      // Exit goal mode
+      state.goalMode = false;
+      const btn = document.getElementById('goalModeBtn');
+      btn.textContent = 'Set Goal (click map)';
+      btn.classList.remove('active');
+      map.getContainer().style.cursor = '';
     });
 
     renderDocumentTextarea({ frame_id: state.frameId, zones: state.lastZones });
