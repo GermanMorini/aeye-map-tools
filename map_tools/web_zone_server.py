@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -47,6 +48,12 @@ class WebZoneServerNode(Node):
         self.declare_parameter("brake_publish_count", 5)
         self.declare_parameter("brake_publish_interval_s", 0.1)
         self.declare_parameter("zones_file", "")
+        self.declare_parameter("ptz_enabled", True)
+        self.declare_parameter("ptz_camera_ip", "192.168.1.64")
+        self.declare_parameter("ptz_camera_user", "admin")
+        self.declare_parameter("ptz_camera_pass", "teamcit2024")
+        self.declare_parameter("ptz_camera_channel", 1)
+        self.declare_parameter("ptz_timeout_s", 1.5)
 
         self.ws_host = str(self.get_parameter("ws_host").value)
         self.ws_port = int(self.get_parameter("ws_port").value)
@@ -65,6 +72,12 @@ class WebZoneServerNode(Node):
             0.0, float(self.get_parameter("brake_publish_interval_s").value)
         )
         self.zones_file = self._resolve_zones_file(str(self.get_parameter("zones_file").value))
+        self.ptz_enabled = bool(self.get_parameter("ptz_enabled").value)
+        self.ptz_camera_ip = str(self.get_parameter("ptz_camera_ip").value).strip()
+        self.ptz_camera_user = str(self.get_parameter("ptz_camera_user").value).strip()
+        self.ptz_camera_pass = str(self.get_parameter("ptz_camera_pass").value)
+        self.ptz_camera_channel = max(1, int(self.get_parameter("ptz_camera_channel").value))
+        self.ptz_timeout_s = max(0.2, float(self.get_parameter("ptz_timeout_s").value))
 
         self._lock = threading.Lock()
         self._ws_clients: Set[Any] = set()
@@ -122,6 +135,8 @@ class WebZoneServerNode(Node):
                 "mask_ready": self._mask_ready,
                 "mask_source": self._mask_source,
                 "robot_pose": self._last_robot_pose,
+                "ptz_enabled": self.ptz_enabled,
+                "ptz_camera_ip": self.ptz_camera_ip if self.ptz_enabled else "",
             }
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
@@ -270,6 +285,72 @@ class WebZoneServerNode(Node):
         if cancel_ok:
             return True, "brake applied"
         return False, f"brake applied, but goal cancel failed: {cancel_msg}"
+
+    def _ptz_continuous_url(self) -> str:
+        return (
+            f"http://{self.ptz_camera_ip}/ISAPI/PTZCtrl/"
+            f"channels/{self.ptz_camera_channel}/continuous"
+        )
+
+    def send_ptz_continuous(
+        self, pan: float = 0.0, tilt: float = 0.0, zoom: float = 0.0
+    ) -> Tuple[bool, str]:
+        if not self.ptz_enabled:
+            return False, "ptz disabled"
+
+        if not self.ptz_camera_ip:
+            return False, "ptz_camera_ip empty"
+        if not self.ptz_camera_user:
+            return False, "ptz_camera_user empty"
+
+        try:
+            pan_i = int(round(max(-100.0, min(100.0, float(pan)))))
+            tilt_i = int(round(max(-100.0, min(100.0, float(tilt)))))
+            zoom_i = int(round(max(-100.0, min(100.0, float(zoom)))))
+        except Exception:
+            return False, "invalid ptz command values"
+
+        payload = (
+            "<PTZData version=\"2.0\" xmlns=\"http://www.hikvision.com/ver20/XMLSchema\">"
+            f"<pan>{pan_i}</pan><tilt>{tilt_i}</tilt><zoom>{zoom_i}</zoom>"
+            "</PTZData>"
+        )
+
+        cmd = [
+            "curl",
+            "--digest",
+            "-u",
+            f"{self.ptz_camera_user}:{self.ptz_camera_pass}",
+            "-sS",
+            "--fail",
+            "-X",
+            "PUT",
+            "-H",
+            "Content-Type: application/xml",
+            "--data",
+            payload,
+            self._ptz_continuous_url(),
+        ]
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.ptz_timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return False, "ptz timeout"
+        except Exception as exc:
+            return False, f"ptz execution failed: {exc}"
+
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+            msg = detail[-1] if detail else f"curl error code {proc.returncode}"
+            return False, f"ptz request failed: {msg}"
+
+        return True, "ok"
 
     def _get_global_costmap(self) -> Optional[Any]:
         if not self._global_costmap_client.wait_for_service(timeout_sec=2.0):
@@ -525,6 +606,53 @@ class WebSocketApi:
                     "request": "brake",
                     "error": None if ok else err,
                 })
+            )
+            return
+
+        if op == "ptz_continuous":
+            try:
+                pan = float(msg.get("pan", 0.0))
+                tilt = float(msg.get("tilt", 0.0))
+                zoom = float(msg.get("zoom", 0.0))
+            except (ValueError, TypeError) as e:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "op": "ack",
+                            "ok": False,
+                            "request": "ptz_continuous",
+                            "error": f"invalid parameters: {str(e)}",
+                        }
+                    )
+                )
+                return
+
+            ok, err = await asyncio.to_thread(
+                self.node.send_ptz_continuous, pan, tilt, zoom
+            )
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "ack",
+                        "ok": ok,
+                        "request": "ptz_continuous",
+                        "error": None if ok else err,
+                    }
+                )
+            )
+            return
+
+        if op == "ptz_stop":
+            ok, err = await asyncio.to_thread(self.node.send_ptz_continuous, 0.0, 0.0, 0.0)
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "ack",
+                        "ok": ok,
+                        "request": "ptz_stop",
+                        "error": None if ok else err,
+                    }
+                )
             )
             return
 

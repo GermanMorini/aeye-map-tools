@@ -85,10 +85,111 @@
     .status.bad { color: var(--bad); }
     #map {
       width: 100%;
-      height: calc(100vh - 24px);
+      height: 100%;
       border-radius: 12px;
       border: 1px solid var(--line);
       overflow: hidden;
+    }
+    .map-stack {
+      display: grid;
+      grid-template-rows: minmax(320px, 7fr) minmax(360px, 5fr);
+      gap: 12px;
+      height: calc(100vh - 24px);
+    }
+    .video-card {
+      background: linear-gradient(180deg, #0d1423, var(--panel));
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      display: grid;
+      grid-template-rows: auto auto auto 1fr;
+      gap: 8px;
+      min-height: 240px;
+    }
+    .video-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .video-head h2 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .video-tools {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .video-tools-2 {
+      grid-template-columns: auto auto auto auto;
+      align-items: center;
+      justify-content: start;
+    }
+    .ptz-speed {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .ptz-speed input {
+      width: 140px;
+      padding: 0;
+    }
+    .inline-check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .inline-check input {
+      width: auto;
+      padding: 0;
+    }
+    .video-viewport {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 220px;
+    }
+    #cameraFrame {
+      width: 100%;
+      height: 100%;
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      background: #020617;
+    }
+    .ptz-overlay {
+      position: absolute;
+      inset: 0;
+      border-radius: 10px;
+      border: 1px dashed transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      user-select: none;
+      background: transparent;
+      color: #e2e8f0;
+      font-size: 13px;
+      font-weight: 600;
+      text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+    }
+    .ptz-overlay.active {
+      pointer-events: auto;
+      cursor: move;
+      border-color: #334155;
+      background: rgba(2, 6, 23, 0.18);
+    }
+    .ptz-overlay.dragging {
+      background: rgba(8, 47, 73, 0.26);
+      border-color: #22d3ee;
     }
     .zone-list {
       margin: 0;
@@ -125,7 +226,13 @@
     }
     @media (max-width: 1080px) {
       .layout { grid-template-columns: 1fr; height: auto; }
-      #map { height: 60vh; }
+      .map-stack {
+        height: auto;
+        grid-template-rows: 50vh 50vh;
+      }
+      .video-tools-2 {
+        grid-template-columns: 1fr 1fr;
+      }
     }
   </style>
 </head>
@@ -178,7 +285,44 @@
       <pre id="events"></pre>
     </div>
 
-    <div id="map"></div>
+    <div class="map-stack">
+      <div id="map"></div>
+      <div class="video-card">
+        <div class="video-head">
+          <h2>Camera Stream</h2>
+          <div id="videoStatus" class="status">Ready</div>
+        </div>
+        <div class="video-tools">
+          <input id="videoUrl" value="http://100.111.4.7:8889/cam3/" />
+          <button id="videoLoadBtn" class="secondary">Load</button>
+          <button id="videoRefreshBtn" class="secondary">Refresh</button>
+        </div>
+        <div class="video-tools video-tools-2">
+          <button id="ptzMouseBtn" class="secondary">PTZ Mouse: OFF</button>
+          <label class="ptz-speed">Speed
+            <input id="ptzSpeed" type="range" min="20" max="100" step="5" value="70" />
+          </label>
+          <label class="inline-check">
+            <input id="ptzInvertX" type="checkbox" checked />
+            Invert X
+          </label>
+          <label class="inline-check">
+            <input id="ptzInvertY" type="checkbox" />
+            Invert Y
+          </label>
+        </div>
+        <div class="video-viewport">
+          <iframe
+            id="cameraFrame"
+            title="camera stream"
+            src="http://100.111.4.7:8889/cam3/"
+            allow="autoplay; fullscreen"
+            referrerpolicy="no-referrer"
+          ></iframe>
+          <div id="ptzOverlay" class="ptz-overlay">Hold and drag to move PTZ</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -237,7 +381,12 @@
       lastZones: [],
       robotMarker: null,
       goalMode: false,
-      goalMarker: null
+      goalMarker: null,
+      ptzMouseMode: false,
+      ptzDragging: false,
+      ptzLastPan: 0,
+      ptzLastTilt: 0,
+      ptzLastSendMs: 0,
     };
 
     const goalIcon = L.divIcon({
@@ -262,13 +411,15 @@
       pre.scrollTop = pre.scrollHeight;
     }
 
-    function send(payload) {
+    function send(payload, shouldLog = true) {
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
         setStatus('WebSocket not connected', false);
         return;
       }
       state.ws.send(JSON.stringify(payload));
-      logEvent(payload, 'tx');
+      if (shouldLog) {
+        logEvent(payload, 'tx');
+      }
     }
 
     function connectWs() {
@@ -309,6 +460,117 @@
       }
     }
 
+    function setVideoStatus(text, ok = null) {
+      const s = document.getElementById('videoStatus');
+      s.textContent = text;
+      s.className = 'status';
+      if (ok === true) s.classList.add('good');
+      if (ok === false) s.classList.add('bad');
+    }
+
+    function loadCameraFrame(forceRefresh = false) {
+      const input = document.getElementById('videoUrl');
+      const frame = document.getElementById('cameraFrame');
+      const raw = input.value.trim();
+      if (!raw) {
+        setVideoStatus('Video URL is empty', false);
+        return;
+      }
+
+      let nextUrl;
+      try {
+        const parsed = new URL(raw, window.location.href);
+        if (forceRefresh) {
+          parsed.searchParams.set('_ts', `${Date.now()}`);
+        }
+        nextUrl = parsed.toString();
+      } catch (err) {
+        setVideoStatus('Invalid URL', false);
+        return;
+      }
+
+      frame.src = nextUrl;
+      setVideoStatus(`Loading ${raw}`, true);
+    }
+
+    function clampPtz(v) {
+      if (!Number.isFinite(v)) return 0;
+      if (v > 100) return 100;
+      if (v < -100) return -100;
+      return Math.round(v);
+    }
+
+    function scaleWithDeadzone(v, deadzone = 0.10) {
+      const av = Math.abs(v);
+      if (av <= deadzone) return 0;
+      const out = (av - deadzone) / (1.0 - deadzone);
+      return Math.sign(v) * out;
+    }
+
+    function computePtzFromPointer(ev) {
+      const overlay = document.getElementById('ptzOverlay');
+      const rect = overlay.getBoundingClientRect();
+      if (!rect.width || !rect.height) {
+        return { pan: 0, tilt: 0 };
+      }
+
+      const nx = ((ev.clientX - rect.left) - rect.width / 2) / (rect.width / 2);
+      const ny = ((rect.top + rect.height / 2) - ev.clientY) / (rect.height / 2);
+      const sx = scaleWithDeadzone(Math.max(-1, Math.min(1, nx)));
+      const sy = scaleWithDeadzone(Math.max(-1, Math.min(1, ny)));
+      const speed = (Number(document.getElementById('ptzSpeed').value) || 70) / 100.0;
+      const invertX = document.getElementById('ptzInvertX').checked ? -1 : 1;
+      const invertY = document.getElementById('ptzInvertY').checked ? -1 : 1;
+
+      const pan = clampPtz(sx * 100.0 * speed * invertX);
+      const tilt = clampPtz(sy * 100.0 * speed * invertY);
+      return { pan, tilt };
+    }
+
+    function sendPtzContinuous(pan, tilt, force = false) {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        setVideoStatus('PTZ requires WebSocket connection', false);
+        return;
+      }
+      const panI = clampPtz(pan);
+      const tiltI = clampPtz(tilt);
+      const now = Date.now();
+      if (!force) {
+        if (panI === state.ptzLastPan && tiltI === state.ptzLastTilt) return;
+        if ((now - state.ptzLastSendMs) < 90) return;
+      }
+      state.ptzLastPan = panI;
+      state.ptzLastTilt = tiltI;
+      state.ptzLastSendMs = now;
+      send({ op: 'ptz_continuous', pan: panI, tilt: tiltI, zoom: 0 }, false);
+    }
+
+    function sendPtzStop(force = false) {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      if (!force && state.ptzLastPan === 0 && state.ptzLastTilt === 0) return;
+      state.ptzLastPan = 0;
+      state.ptzLastTilt = 0;
+      state.ptzLastSendMs = Date.now();
+      send({ op: 'ptz_stop' }, false);
+    }
+
+    function setPtzMouseMode(enabled) {
+      state.ptzMouseMode = enabled;
+      state.ptzDragging = false;
+      const btn = document.getElementById('ptzMouseBtn');
+      const overlay = document.getElementById('ptzOverlay');
+      btn.textContent = enabled ? 'PTZ Mouse: ON' : 'PTZ Mouse: OFF';
+      btn.classList.toggle('active', enabled);
+      overlay.classList.toggle('active', enabled);
+      overlay.classList.remove('dragging');
+      setVideoStatus(enabled ? 'PTZ mouse enabled' : 'PTZ mouse disabled', true);
+      if (!enabled) {
+        sendPtzStop(true);
+      }
+    }
+
     function handleServerMessage(msg) {
       if (msg.op === 'state' && msg.ok === true) {
         state.frameId = msg.frame_id || 'map';
@@ -322,6 +584,9 @@
         const maskReady = msg.mask_ready === true;
         const maskReadyText = maskReady ? 'mask ready' : 'mask not ready';
         setStatus(`state updated (${maskReadyText}, source=${maskSource})`, maskReady);
+        if (msg.ptz_enabled === false) {
+          setVideoStatus('Video loaded (PTZ disabled on server)', false);
+        }
         return;
       }
 
@@ -364,6 +629,11 @@
             goalStatusEl.textContent = `Brake failed: ${msg.error || 'error'}`;
             goalStatusEl.className = 'status bad';
           }
+        } else if (msg.request === 'ptz_continuous' || msg.request === 'ptz_stop') {
+          if (!msg.ok) {
+            setVideoStatus(`PTZ error: ${msg.error || 'error'}`, false);
+          }
+          return;
         } else {
           if (msg.ok) {
             const published = msg.published ? 'published' : 'not published';
@@ -572,6 +842,50 @@
       send({ op: 'brake' });
     });
 
+    document.getElementById('videoLoadBtn').addEventListener('click', () => {
+      loadCameraFrame(false);
+    });
+    document.getElementById('videoRefreshBtn').addEventListener('click', () => {
+      loadCameraFrame(true);
+    });
+    document.getElementById('videoUrl').addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        loadCameraFrame(false);
+      }
+    });
+    document.getElementById('cameraFrame').addEventListener('load', () => {
+      setVideoStatus('Video panel loaded', true);
+    });
+    document.getElementById('ptzMouseBtn').addEventListener('click', () => {
+      setPtzMouseMode(!state.ptzMouseMode);
+    });
+
+    const ptzOverlay = document.getElementById('ptzOverlay');
+    ptzOverlay.addEventListener('pointerdown', (ev) => {
+      if (!state.ptzMouseMode) return;
+      if (ev.button !== 0) return;
+      state.ptzDragging = true;
+      ptzOverlay.classList.add('dragging');
+      ptzOverlay.setPointerCapture(ev.pointerId);
+      const cmd = computePtzFromPointer(ev);
+      sendPtzContinuous(cmd.pan, cmd.tilt, true);
+    });
+    ptzOverlay.addEventListener('pointermove', (ev) => {
+      if (!state.ptzMouseMode || !state.ptzDragging) return;
+      const cmd = computePtzFromPointer(ev);
+      sendPtzContinuous(cmd.pan, cmd.tilt, false);
+    });
+    function stopPtzDrag() {
+      if (!state.ptzDragging) return;
+      state.ptzDragging = false;
+      ptzOverlay.classList.remove('dragging');
+      sendPtzStop(false);
+    }
+    ptzOverlay.addEventListener('pointerup', stopPtzDrag);
+    ptzOverlay.addEventListener('pointercancel', stopPtzDrag);
+    ptzOverlay.addEventListener('pointerleave', stopPtzDrag);
+    window.addEventListener('mouseup', stopPtzDrag);
+
     map.on('click', (e) => {
       if (!state.goalMode) return;
       const { lat, lng } = e.latlng;
@@ -593,6 +907,8 @@
 
     renderDocumentTextarea({ frame_id: state.frameId, zones: state.lastZones });
     renderZoneList({ zones: state.lastZones });
+    setPtzMouseMode(false);
+    loadCameraFrame(false);
   </script>
 </body>
 </html>
