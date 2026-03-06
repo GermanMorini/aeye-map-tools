@@ -52,6 +52,8 @@ class WebZoneServerNode(Node):
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("gps_broadcast_hz", 1.0)
         self.declare_parameter("brake_topic", "/cmd_vel_safe")
+        self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
+        self.declare_parameter("nav_telemetry_hz", 5.0)
         self.declare_parameter("brake_publish_count", 5)
         self.declare_parameter("brake_publish_interval_s", 0.1)
         self.declare_parameter("zones_file", "")
@@ -90,6 +92,8 @@ class WebZoneServerNode(Node):
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.gps_broadcast_hz = float(self.get_parameter("gps_broadcast_hz").value)
         self.brake_topic = str(self.get_parameter("brake_topic").value)
+        self.cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
+        self.nav_telemetry_hz = float(self.get_parameter("nav_telemetry_hz").value)
         self.brake_publish_count = max(1, int(self.get_parameter("brake_publish_count").value))
         self.brake_publish_interval_s = max(
             0.0, float(self.get_parameter("brake_publish_interval_s").value)
@@ -126,6 +130,7 @@ class WebZoneServerNode(Node):
         self._sanitize_degrade_params()
         self._sanitize_mask_grid_params()
         self._sanitize_snapshot_params()
+        self._sanitize_telemetry_params()
 
         self._lock = threading.Lock()
         self._ws_clients: Set[Any] = set()
@@ -144,6 +149,8 @@ class WebZoneServerNode(Node):
         self._last_collision_polygons: Optional[MarkerArray] = None
         self._last_scan: Optional[LaserScan] = None
         self._last_plan: Optional[NavPath] = None
+        self._last_cmd_vel_safe: Optional[Twist] = None
+        self._last_nav_telemetry_monotonic: Optional[float] = None
 
         self._fromll_client = self.create_client(FromLL, self.fromll_service)
         self._global_costmap_client = self.create_client(
@@ -163,6 +170,9 @@ class WebZoneServerNode(Node):
         self._brake_pub = self.create_publisher(Twist, self.brake_topic, 10)
         self._gps_sub = self.create_subscription(
             NavSatFix, self.gps_topic, self._on_gps_fix, 10
+        )
+        self._cmd_vel_safe_sub = self.create_subscription(
+            Twist, self.cmd_vel_safe_topic, self._on_cmd_vel_safe, 10
         )
 
         costmap_qos = QoSProfile(depth=1)
@@ -333,6 +343,18 @@ class WebZoneServerNode(Node):
             f"timeout_ms={self.snapshot_timeout_ms}"
         )
 
+    def _sanitize_telemetry_params(self) -> None:
+        if self.nav_telemetry_hz <= 0.0 or not np.isfinite(self.nav_telemetry_hz):
+            self.get_logger().warning(
+                f"nav_telemetry_hz={self.nav_telemetry_hz} is invalid; forcing 5.0"
+            )
+            self.nav_telemetry_hz = 5.0
+        self.get_logger().info(
+            "Navigation telemetry params: "
+            f"cmd_vel_topic={self.cmd_vel_safe_topic}, "
+            f"broadcast_hz={self.nav_telemetry_hz:.2f}"
+        )
+
     def _build_fixed_mask_metadata(self) -> MapMetaData:
         info = MapMetaData()
         info.map_load_time = self.get_clock().now().to_msg()
@@ -363,6 +385,7 @@ class WebZoneServerNode(Node):
 
     def snapshot_state(self) -> Dict[str, Any]:
         with self._lock:
+            cmd_vel_safe = self._cmd_vel_safe_payload_locked()
             return {
                 "op": "state",
                 "ok": True,
@@ -371,7 +394,41 @@ class WebZoneServerNode(Node):
                 "mask_ready": self._mask_ready,
                 "mask_source": self._mask_source,
                 "robot_pose": self._last_robot_pose,
+                "cmd_vel_safe": cmd_vel_safe,
             }
+
+    def _cmd_vel_safe_payload_locked(self) -> Dict[str, Any]:
+        if self._last_cmd_vel_safe is None:
+            return {
+                "available": False,
+                "linear_x": 0.0,
+                "angular_z": 0.0,
+            }
+        msg = self._last_cmd_vel_safe
+        return {
+            "available": True,
+            "linear_x": float(msg.linear.x),
+            "angular_z": float(msg.angular.z),
+        }
+
+    def _build_nav_telemetry_payload(self) -> Dict[str, Any]:
+        with self._lock:
+            cmd_vel_safe = self._cmd_vel_safe_payload_locked()
+        return {
+            "op": "nav_telemetry",
+            "cmd_vel_safe": cmd_vel_safe,
+        }
+
+    def _broadcast_nav_telemetry(self, force: bool = False) -> None:
+        now = time.monotonic()
+        min_interval = 1.0 / max(0.1, float(self.nav_telemetry_hz))
+        with self._lock:
+            last_sent = self._last_nav_telemetry_monotonic
+            if (not force) and (last_sent is not None) and ((now - last_sent) < min_interval):
+                return
+            self._last_nav_telemetry_monotonic = now
+        payload = self._build_nav_telemetry_payload()
+        asyncio.run_coroutine_threadsafe(self._broadcast(payload), self._loop)
 
     def _on_local_costmap(self, msg: OccupancyGrid) -> None:
         with self._lock:
@@ -404,6 +461,11 @@ class WebZoneServerNode(Node):
     def _on_plan(self, msg: NavPath) -> None:
         with self._lock:
             self._last_plan = msg
+
+    def _on_cmd_vel_safe(self, msg: Twist) -> None:
+        with self._lock:
+            self._last_cmd_vel_safe = msg
+        self._broadcast_nav_telemetry(force=False)
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
         if not np.isfinite(msg.latitude) or not np.isfinite(msg.longitude):
@@ -1069,7 +1131,8 @@ class WebZoneServerNode(Node):
         if not goal_handle.accepted:
             return False, "goal rejected by Nav2"
 
-        self._current_goal_handle = goal_handle
+        with self._lock:
+            self._current_goal_handle = goal_handle
         return True, "goal accepted"
 
     def cancel_current_goal(self) -> Tuple[bool, str]:
@@ -1082,7 +1145,8 @@ class WebZoneServerNode(Node):
         if result is None:
             return False, "timeout cancelling goal"
 
-        self._current_goal_handle = None
+        with self._lock:
+            self._current_goal_handle = None
         return True, "cancelled"
 
     def apply_brake(self) -> Tuple[bool, str]:

@@ -27,6 +27,8 @@ def generate_launch_description():
     snapshot_global_inset_px = LaunchConfiguration("snapshot_global_inset_px")
     snapshot_timeout_ms = LaunchConfiguration("snapshot_timeout_ms")
     plan_topic = LaunchConfiguration("plan_topic")
+    cmd_vel_safe_topic = LaunchConfiguration("cmd_vel_safe_topic")
+    nav_telemetry_hz = LaunchConfiguration("nav_telemetry_hz")
 
     return LaunchDescription(
         [
@@ -53,6 +55,8 @@ def generate_launch_description():
             DeclareLaunchArgument("snapshot_global_inset_px", default_value="160"),
             DeclareLaunchArgument("snapshot_timeout_ms", default_value="500"),
             DeclareLaunchArgument("plan_topic", default_value="/plan"),
+            DeclareLaunchArgument("cmd_vel_safe_topic", default_value="/cmd_vel_safe"),
+            DeclareLaunchArgument("nav_telemetry_hz", default_value="5.0"),
             Node(
                 package="map_tools",
                 executable="web_zone_server",
@@ -87,6 +91,10 @@ def generate_launch_description():
                             snapshot_timeout_ms, value_type=int
                         ),
                         "plan_topic": plan_topic,
+                        "cmd_vel_safe_topic": cmd_vel_safe_topic,
+                        "nav_telemetry_hz": ParameterValue(
+                            nav_telemetry_hz, value_type=float
+                        ),
                     }
                 ],
             ),

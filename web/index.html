@@ -212,10 +212,8 @@
           <button id="snapshotBtn" class="secondary">Snapshot Nav</button>
         </div>
         <div id="goalStatus" class="status">No active goal</div>
+        <div id="cmdVelSafeStatus" class="status">cmd_vel_safe: n/a</div>
       </div>
-
-      <h2>Current Document (lat/lon)</h2>
-      <textarea id="zonesJson" readonly></textarea>
 
       <h2>Events</h2>
       <pre id="events"></pre>
@@ -292,7 +290,8 @@
       robotMarker: null,
       goalMode: false,
       goalMarker: null,
-      lastSnapshot: null
+      lastSnapshot: null,
+      cmdVelSafe: null
     };
 
     const goalIcon = L.divIcon({
@@ -330,7 +329,34 @@
           error: msg.error || null
         };
       }
+      if (msg && msg.op === 'nav_telemetry') {
+        return {
+          op: msg.op,
+          cmd_vel_safe: msg.cmd_vel_safe
+            ? {
+                linear_x: msg.cmd_vel_safe.linear_x,
+                angular_z: msg.cmd_vel_safe.angular_z
+              }
+            : null
+        };
+      }
       return msg;
+    }
+
+    function updateNavTelemetry(payload) {
+      const cmdVel = payload && payload.cmd_vel_safe ? payload.cmd_vel_safe : null;
+      state.cmdVelSafe = cmdVel;
+
+      const cmdEl = document.getElementById('cmdVelSafeStatus');
+      if (cmdVel && cmdVel.available === true) {
+        const vx = Number(cmdVel.linear_x || 0).toFixed(2);
+        const wz = Number(cmdVel.angular_z || 0).toFixed(2);
+        cmdEl.textContent = `cmd_vel_safe: vx=${vx} m/s, wz=${wz} rad/s`;
+        cmdEl.className = 'status';
+      } else {
+        cmdEl.textContent = 'cmd_vel_safe: n/a';
+        cmdEl.className = 'status';
+      }
     }
 
     function send(payload) {
@@ -369,7 +395,9 @@
           logEvent(`invalid json from server: ${ev.data}`, 'rx');
           return;
         }
-        logEvent(summarizeIncomingMessage(msg), 'rx');
+        if (msg.op !== 'nav_telemetry') {
+          logEvent(summarizeIncomingMessage(msg), 'rx');
+        }
         handleServerMessage(msg);
       };
     }
@@ -387,17 +415,22 @@
         state.lastZones = zones;
         renderMapFromZones(zones);
         updateRobotPose(msg.robot_pose || null);
-        renderDocumentTextarea({ frame_id: state.frameId, zones });
         renderZoneList({ zones });
         const maskSource = msg.mask_source || 'map';
         const maskReady = msg.mask_ready === true;
         const maskReadyText = maskReady ? 'mask ready' : 'mask not ready';
         setStatus(`state updated (${maskReadyText}, source=${maskSource})`, maskReady);
+        updateNavTelemetry({ cmd_vel_safe: msg.cmd_vel_safe });
         return;
       }
 
       if (msg.op === 'robot_pose') {
         updateRobotPose(msg.pose || null);
+        return;
+      }
+
+      if (msg.op === 'nav_telemetry') {
+        updateNavTelemetry(msg);
         return;
       }
 
@@ -531,10 +564,6 @@
       });
     }
 
-    function renderDocumentTextarea(doc) {
-      window.document.getElementById('zonesJson').value = JSON.stringify(doc, null, 2);
-    }
-
     function renderZoneList(doc) {
       const ul = window.document.getElementById('zoneList');
       ul.innerHTML = '';
@@ -589,7 +618,6 @@
 
     function pushLayersToServer() {
       const zones = collectZonesFromLayers();
-      renderDocumentTextarea({ frame_id: state.frameId, zones });
       renderZoneList({ zones });
       send({ op: 'set_zones_ll', zones });
     }
@@ -696,7 +724,6 @@
       map.getContainer().style.cursor = '';
     });
 
-    renderDocumentTextarea({ frame_id: state.frameId, zones: state.lastZones });
     renderZoneList({ zones: state.lastZones });
   </script>
 </body>
