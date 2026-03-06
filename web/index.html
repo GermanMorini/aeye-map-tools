@@ -123,6 +123,48 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      padding: 16px;
+    }
+    .modal-backdrop.show { display: flex; }
+    .modal-card {
+      width: min(920px, 96vw);
+      max-height: 92vh;
+      background: linear-gradient(180deg, #0b1220, #111827);
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 12px;
+      overflow: auto;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      gap: 8px;
+    }
+    .modal-header h3 {
+      margin: 0;
+      font-size: 15px;
+    }
+    #snapshotImage {
+      width: 100%;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #0b1220;
+    }
+    #snapshotMeta {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
     @media (max-width: 1080px) {
       .layout { grid-template-columns: 1fr; height: auto; }
       #map { height: 60vh; }
@@ -167,6 +209,7 @@
         </div>
         <div class="row">
           <button id="brakeBtn" class="danger">Brake Now</button>
+          <button id="snapshotBtn" class="secondary">Snapshot Nav</button>
         </div>
         <div id="goalStatus" class="status">No active goal</div>
       </div>
@@ -179,6 +222,17 @@
     </div>
 
     <div id="map"></div>
+  </div>
+
+  <div id="snapshotModal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Navigation Snapshot</h3>
+        <button id="snapshotCloseBtn" class="secondary">Close</button>
+      </div>
+      <img id="snapshotImage" alt="nav snapshot" />
+      <div id="snapshotMeta">No snapshot loaded.</div>
+    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -237,7 +291,8 @@
       lastZones: [],
       robotMarker: null,
       goalMode: false,
-      goalMarker: null
+      goalMarker: null,
+      lastSnapshot: null
     };
 
     const goalIcon = L.divIcon({
@@ -260,6 +315,22 @@
       const text = typeof obj === 'string' ? obj : JSON.stringify(obj);
       pre.textContent += `[${new Date().toISOString()}][${dir}] ${text}\n`;
       pre.scrollTop = pre.scrollHeight;
+    }
+
+    function summarizeIncomingMessage(msg) {
+      if (msg && msg.op === 'nav_snapshot') {
+        return {
+          op: msg.op,
+          ok: msg.ok,
+          width: msg.width,
+          height: msg.height,
+          frame_id: msg.frame_id,
+          image_size_bytes: msg.image_size_bytes,
+          layers: msg.layers,
+          error: msg.error || null
+        };
+      }
+      return msg;
     }
 
     function send(payload) {
@@ -298,7 +369,7 @@
           logEvent(`invalid json from server: ${ev.data}`, 'rx');
           return;
         }
-        logEvent(msg, 'rx');
+        logEvent(summarizeIncomingMessage(msg), 'rx');
         handleServerMessage(msg);
       };
     }
@@ -327,6 +398,29 @@
 
       if (msg.op === 'robot_pose') {
         updateRobotPose(msg.pose || null);
+        return;
+      }
+
+      if (msg.op === 'nav_snapshot') {
+        const metaEl = document.getElementById('snapshotMeta');
+        if (msg.ok === true && typeof msg.image_b64 === 'string' && msg.image_b64.length > 0) {
+          state.lastSnapshot = msg;
+          const img = document.getElementById('snapshotImage');
+          img.src = `data:${msg.mime || 'image/png'};base64,${msg.image_b64}`;
+          const layers = msg.layers || {};
+          const activeLayers = Object.entries(layers)
+            .filter((entry) => entry[1] === true)
+            .map((entry) => entry[0])
+            .join(', ');
+          const stamp = msg.stamp ? `${msg.stamp.sec}.${String(msg.stamp.nanosec || 0).padStart(9, '0')}` : 'n/a';
+          metaEl.textContent =
+            `frame=${msg.frame_id || 'n/a'} · size=${msg.width || 0}x${msg.height || 0} · ` +
+            `png=${msg.image_size_bytes || 0} bytes · stamp=${stamp} · layers=${activeLayers || 'none'}`;
+          document.getElementById('snapshotModal').classList.add('show');
+          return;
+        }
+        metaEl.textContent = `Snapshot error: ${msg.error || 'unknown error'}`;
+        document.getElementById('snapshotModal').classList.add('show');
         return;
       }
 
@@ -570,6 +664,17 @@
 
     document.getElementById('brakeBtn').addEventListener('click', () => {
       send({ op: 'brake' });
+    });
+    document.getElementById('snapshotBtn').addEventListener('click', () => {
+      send({ op: 'get_nav_snapshot' });
+    });
+    document.getElementById('snapshotCloseBtn').addEventListener('click', () => {
+      document.getElementById('snapshotModal').classList.remove('show');
+    });
+    document.getElementById('snapshotModal').addEventListener('click', (e) => {
+      if (e.target && e.target.id === 'snapshotModal') {
+        document.getElementById('snapshotModal').classList.remove('show');
+      }
     });
 
     map.on('click', (e) => {
