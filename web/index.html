@@ -300,7 +300,8 @@
       <h2>Navigation</h2>
       <div class="stack">
         <div class="row">
-          <button id="goalModeBtn" class="secondary">Set Goal (click map)</button>
+          <button id="goalModeBtn" class="secondary">Set Goal</button>
+          <button id="resendGoalBtn" class="secondary" disabled>Resend Last Goal</button>
           <button id="cancelGoalBtn" class="secondary">Cancel Goal</button>
         </div>
         <div class="row">
@@ -407,6 +408,7 @@
       primaryView: 'camera',
       goalMode: false,
       goalMarker: null,
+      lastGoal: null,
       lastSnapshot: null,
       cmdVelSafe: null,
       manualControl: { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0, last_cmd_age_s: null },
@@ -444,14 +446,19 @@
       state.goalMode = enabled === true;
       const btn = document.getElementById('goalModeBtn');
       if (state.goalMode) {
-        btn.textContent = 'Set Goal (click map) — ACTIVE';
+        btn.textContent = 'Set Goal - ACTIVE';
         btn.classList.add('active');
         map.getContainer().style.cursor = 'crosshair';
       } else {
-        btn.textContent = 'Set Goal (click map)';
+        btn.textContent = 'Set Goal';
         btn.classList.remove('active');
         map.getContainer().style.cursor = '';
       }
+    }
+
+    function updateResendGoalBtnState() {
+      const btn = document.getElementById('resendGoalBtn');
+      btn.disabled = !(state.lastGoal && Number.isFinite(state.lastGoal.lat) && Number.isFinite(state.lastGoal.lon));
     }
 
     function applyViewMode() {
@@ -1054,6 +1061,26 @@
       send({ op: 'cancel_goal' });
     });
 
+    document.getElementById('resendGoalBtn').addEventListener('click', () => {
+      if (state.manualControl.enabled) {
+        setStatus('Disable manual control before sending a goal', false);
+        return;
+      }
+      if (!state.lastGoal || !Number.isFinite(state.lastGoal.lat) || !Number.isFinite(state.lastGoal.lon)) {
+        setStatus('No previous goal available to resend', false);
+        return;
+      }
+
+      if (state.goalMarker) map.removeLayer(state.goalMarker);
+      state.goalMarker = L.marker([state.lastGoal.lat, state.lastGoal.lon], { icon: goalIcon }).addTo(map);
+      send({
+        op: 'set_goal_ll',
+        lat: state.lastGoal.lat,
+        lon: state.lastGoal.lon,
+        yaw_deg: Number(state.lastGoal.yaw_deg || 0)
+      });
+    });
+
     document.getElementById('manualModeBtn').addEventListener('click', () => {
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
         setStatus('WebSocket not connected', false);
@@ -1131,9 +1158,16 @@
       // Show marker on map
       if (state.goalMarker) map.removeLayer(state.goalMarker);
       state.goalMarker = L.marker([lat, lng], { icon: goalIcon }).addTo(map);
+      state.lastGoal = { lat, lon: lng, yaw_deg: 0 };
+      updateResendGoalBtnState();
 
       // Send to server
-      send({ op: 'set_goal_ll', lat, lon: lng, yaw_deg: 0 });
+      send({
+        op: 'set_goal_ll',
+        lat: state.lastGoal.lat,
+        lon: state.lastGoal.lon,
+        yaw_deg: state.lastGoal.yaw_deg
+      });
 
       // Exit goal mode
       setGoalModeUi(false);
@@ -1144,6 +1178,7 @@
     updateManualSliderLabels();
     renderManualStatus();
     renderZoneList({ zones: state.lastZones });
+    updateResendGoalBtnState();
   </script>
 </body>
 </html>

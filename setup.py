@@ -18,7 +18,7 @@ setup(
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
         (os.path.join("share", package_name, "web"), glob("web/*")),
     ],
-    install_requires=["setuptools", "PyYAML", "websockets", "numpy"],
+    install_requires=["setuptools", "websockets", "numpy"],
     zip_safe=True,
     maintainer="TODO",
     maintainer_email="todo@example.com",
