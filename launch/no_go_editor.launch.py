@@ -29,6 +29,9 @@ def generate_launch_description():
     plan_topic = LaunchConfiguration("plan_topic")
     cmd_vel_safe_topic = LaunchConfiguration("cmd_vel_safe_topic")
     nav_telemetry_hz = LaunchConfiguration("nav_telemetry_hz")
+    manual_cmd_topic = LaunchConfiguration("manual_cmd_topic")
+    manual_cmd_timeout_s = LaunchConfiguration("manual_cmd_timeout_s")
+    manual_watchdog_hz = LaunchConfiguration("manual_watchdog_hz")
 
     return LaunchDescription(
         [
@@ -57,6 +60,9 @@ def generate_launch_description():
             DeclareLaunchArgument("plan_topic", default_value="/plan"),
             DeclareLaunchArgument("cmd_vel_safe_topic", default_value="/cmd_vel_safe"),
             DeclareLaunchArgument("nav_telemetry_hz", default_value="5.0"),
+            DeclareLaunchArgument("manual_cmd_topic", default_value="/cmd_vel_safe"),
+            DeclareLaunchArgument("manual_cmd_timeout_s", default_value="0.4"),
+            DeclareLaunchArgument("manual_watchdog_hz", default_value="10.0"),
             Node(
                 package="map_tools",
                 executable="web_zone_server",
@@ -94,6 +100,13 @@ def generate_launch_description():
                         "cmd_vel_safe_topic": cmd_vel_safe_topic,
                         "nav_telemetry_hz": ParameterValue(
                             nav_telemetry_hz, value_type=float
+                        ),
+                        "manual_cmd_topic": manual_cmd_topic,
+                        "manual_cmd_timeout_s": ParameterValue(
+                            manual_cmd_timeout_s, value_type=float
+                        ),
+                        "manual_watchdog_hz": ParameterValue(
+                            manual_watchdog_hz, value_type=float
                         ),
                     }
                 ],

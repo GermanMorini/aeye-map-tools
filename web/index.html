@@ -74,6 +74,11 @@
       border-color: #991b1b;
       color: #fecaca;
     }
+    button.secondary.manual-on {
+      background: #166534;
+      border-color: #14532d;
+      color: #dcfce7;
+    }
     button.danger {
       background: linear-gradient(180deg, #ef4444, #b91c1c);
       color: #fef2f2;
@@ -83,12 +88,88 @@
     .status { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
     .status.good { color: var(--good); }
     .status.bad { color: var(--bad); }
-    #map {
+    #viewStage {
+      position: relative;
       width: 100%;
       height: calc(100vh - 24px);
       border-radius: 12px;
       border: 1px solid var(--line);
+      background: #020617;
       overflow: hidden;
+    }
+    .view-pane {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      background: #020617;
+      transition: all 180ms ease;
+    }
+    #cameraPane {
+      z-index: 10;
+      border: 0;
+      border-radius: 0;
+    }
+    #cameraFrame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #000;
+    }
+    #gpsPane {
+      z-index: 1100;
+      box-shadow: 0 10px 28px rgba(2, 6, 23, 0.55);
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+    #swapViewBtn {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      z-index: 1300;
+      width: auto;
+      backdrop-filter: blur(2px);
+    }
+    #viewStage.mode-camera-main #cameraPane {
+      inset: 0;
+      z-index: 10;
+      border: 0;
+      border-radius: 0;
+    }
+    #viewStage.mode-camera-main #gpsPane {
+      top: auto;
+      left: auto;
+      right: 14px;
+      bottom: 14px;
+      width: 600px;
+      height: 388px;
+      opacity: 0.97;
+      pointer-events: none;
+    }
+    #viewStage.mode-gps-main #gpsPane {
+      inset: 0;
+      z-index: 10;
+      border: 0;
+      border-radius: 0;
+      opacity: 1;
+      pointer-events: auto;
+      box-shadow: none;
+    }
+    #viewStage.mode-gps-main #cameraPane {
+      top: auto;
+      left: auto;
+      right: 14px;
+      bottom: 14px;
+      width: 600px;
+      height: 388px;
+      z-index: 1100;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      box-shadow: 0 10px 28px rgba(2, 6, 23, 0.55);
+      opacity: 0.97;
     }
     .zone-list {
       margin: 0;
@@ -167,7 +248,22 @@
     }
     @media (max-width: 1080px) {
       .layout { grid-template-columns: 1fr; height: auto; }
-      #map { height: 60vh; }
+      #viewStage { height: 60vh; }
+      #swapViewBtn {
+        bottom: 10px;
+        left: 10px;
+      }
+      #viewStage.mode-camera-main #gpsPane,
+      #viewStage.mode-gps-main #cameraPane {
+        width: 42vw;
+        height: 28vw;
+        min-width: 180px;
+        min-height: 120px;
+        max-width: 300px;
+        max-height: 200px;
+        right: 10px;
+        bottom: 10px;
+      }
     }
   </style>
 </head>
@@ -208,18 +304,37 @@
           <button id="cancelGoalBtn" class="secondary">Cancel Goal</button>
         </div>
         <div class="row">
-          <button id="brakeBtn" class="danger">Brake Now</button>
+          <button id="manualModeBtn" class="secondary">Manual Control: OFF</button>
           <button id="snapshotBtn" class="secondary">Snapshot Nav</button>
+        </div>
+        <div class="stack" style="gap:4px;">
+          <label style="font-size:13px;">
+            Linear speed max: <span id="manualLinearValue">1.20</span> m/s
+          </label>
+          <input id="manualLinearSlider" type="range" min="1.0" max="4.0" step="0.01" value="1.20" />
+          <label style="font-size:13px;">
+            Angular speed max: <span id="manualAngularValue">0.20</span> rad/s
+          </label>
+          <input id="manualAngularSlider" type="range" min="0.1" max="0.4" step="0.01" value="0.20" />
         </div>
         <div id="goalStatus" class="status">No active goal</div>
         <div id="cmdVelSafeStatus" class="status">cmd_vel_safe: n/a</div>
+        <div id="manualStatus" class="status">Manual: OFF · keys=- · vx_cmd=0.00 · wz_cmd=0.00</div>
       </div>
 
       <h2>Events</h2>
       <pre id="events"></pre>
     </div>
 
-    <div id="map"></div>
+    <div id="viewStage" class="mode-camera-main">
+      <div id="cameraPane" class="view-pane">
+        <iframe id="cameraFrame" title="Camera feed" loading="lazy"></iframe>
+      </div>
+      <div id="gpsPane" class="view-pane">
+        <div id="map"></div>
+      </div>
+      <button id="swapViewBtn" class="secondary" type="button">Ver GPS grande</button>
+    </div>
   </div>
 
   <div id="snapshotModal" class="modal-backdrop">
@@ -236,6 +351,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
   <script>
+    const CAMERA_IFRAME_URL = '';
     const map = L.map('map', { zoomControl: true }).setView([-31.421785, -64.102448], 18);
     const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 22,
@@ -288,11 +404,22 @@
       frameId: 'map',
       lastZones: [],
       robotMarker: null,
+      primaryView: 'camera',
       goalMode: false,
       goalMarker: null,
       lastSnapshot: null,
-      cmdVelSafe: null
+      cmdVelSafe: null,
+      manualControl: { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0, last_cmd_age_s: null },
+      manualKeys: { w: false, a: false, s: false, d: false },
+      manualCmd: { linearX: 0.0, angularZ: 0.0 },
+      manualLoopTimer: null
     };
+
+    const MANUAL_LOOP_HZ = 20.0;
+    const MANUAL_LINEAR_STEP_UP = 0.10;
+    const MANUAL_LINEAR_STEP_DOWN = 0.16;
+    const MANUAL_ANGULAR_STEP_UP = 0.03;
+    const MANUAL_ANGULAR_STEP_DOWN = 0.05;
 
     const goalIcon = L.divIcon({
       className: '',
@@ -307,6 +434,46 @@
       s.className = 'status';
       if (ok === true) s.classList.add('good');
       if (ok === false) s.classList.add('bad');
+    }
+
+    function isGpsMainView() {
+      return state.primaryView === 'gps';
+    }
+
+    function setGoalModeUi(enabled) {
+      state.goalMode = enabled === true;
+      const btn = document.getElementById('goalModeBtn');
+      if (state.goalMode) {
+        btn.textContent = 'Set Goal (click map) — ACTIVE';
+        btn.classList.add('active');
+        map.getContainer().style.cursor = 'crosshair';
+      } else {
+        btn.textContent = 'Set Goal (click map)';
+        btn.classList.remove('active');
+        map.getContainer().style.cursor = '';
+      }
+    }
+
+    function applyViewMode() {
+      const stage = document.getElementById('viewStage');
+      const swapBtn = document.getElementById('swapViewBtn');
+      const gpsMain = isGpsMainView();
+
+      stage.classList.toggle('mode-camera-main', !gpsMain);
+      stage.classList.toggle('mode-gps-main', gpsMain);
+      swapBtn.textContent = gpsMain ? 'Ver cámara grande' : 'Ver GPS grande';
+
+      if (!gpsMain && state.goalMode) {
+        setGoalModeUi(false);
+        const goalStatusEl = document.getElementById('goalStatus');
+        goalStatusEl.textContent = 'GPS en minimapa: intercambiá a GPS grande para editar o fijar goal';
+        goalStatusEl.className = 'status';
+      }
+
+      window.requestAnimationFrame(() => {
+        map.invalidateSize(false);
+        window.setTimeout(() => map.invalidateSize(false), 120);
+      });
     }
 
     function logEvent(obj, dir = 'info') {
@@ -337,6 +504,13 @@
                 linear_x: msg.cmd_vel_safe.linear_x,
                 angular_z: msg.cmd_vel_safe.angular_z
               }
+            : null,
+          manual_control: msg.manual_control
+            ? {
+                enabled: msg.manual_control.enabled,
+                linear_x_cmd: msg.manual_control.linear_x_cmd,
+                angular_z_cmd: msg.manual_control.angular_z_cmd
+              }
             : null
         };
       }
@@ -357,6 +531,151 @@
         cmdEl.textContent = 'cmd_vel_safe: n/a';
         cmdEl.className = 'status';
       }
+
+      if (payload && payload.manual_control) {
+        syncManualControlFromServer(payload.manual_control);
+      }
+    }
+
+    function isTextInputFocused() {
+      const active = document.activeElement;
+      if (!active) return false;
+      const tag = (active.tagName || '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      return active.isContentEditable === true;
+    }
+
+    function manualKeysSummary() {
+      const keys = [];
+      if (state.manualKeys.w) keys.push('W');
+      if (state.manualKeys.a) keys.push('A');
+      if (state.manualKeys.s) keys.push('S');
+      if (state.manualKeys.d) keys.push('D');
+      return keys.length > 0 ? keys.join('') : '-';
+    }
+
+    function updateManualSliderLabels() {
+      const linear = Number(document.getElementById('manualLinearSlider').value || 1.2);
+      const angular = Number(document.getElementById('manualAngularSlider').value || 0.2);
+      document.getElementById('manualLinearValue').textContent = linear.toFixed(2);
+      document.getElementById('manualAngularValue').textContent = angular.toFixed(2);
+    }
+
+    function renderManualStatus() {
+      const manual = state.manualControl || { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0 };
+      const enabled = manual.enabled === true;
+      const btn = document.getElementById('manualModeBtn');
+      btn.textContent = enabled ? 'Manual Control: ON' : 'Manual Control: OFF';
+      btn.classList.toggle('manual-on', enabled);
+
+      const vx = Number(state.manualCmd.linearX || 0).toFixed(2);
+      const wz = Number(state.manualCmd.angularZ || 0).toFixed(2);
+      const status = document.getElementById('manualStatus');
+      status.textContent = `Manual: ${enabled ? 'ON' : 'OFF'} · keys=${manualKeysSummary()} · vx_cmd=${vx} · wz_cmd=${wz}`;
+      status.className = enabled ? 'status good' : 'status';
+    }
+
+    function stopManualLoop() {
+      if (state.manualLoopTimer) {
+        window.clearInterval(state.manualLoopTimer);
+        state.manualLoopTimer = null;
+      }
+    }
+
+    function resetManualLocalState() {
+      state.manualKeys.w = false;
+      state.manualKeys.a = false;
+      state.manualKeys.s = false;
+      state.manualKeys.d = false;
+      state.manualCmd.linearX = 0.0;
+      state.manualCmd.angularZ = 0.0;
+    }
+
+    function rampTowards(current, target, stepUp, stepDown) {
+      const delta = target - current;
+      if (Math.abs(delta) < 1e-6) return target;
+      const step = (Math.abs(target) > Math.abs(current)) ? stepUp : stepDown;
+      if (Math.abs(delta) <= step) return target;
+      return current + Math.sign(delta) * step;
+    }
+
+    function sendManualCmd(linearX, angularZ) {
+      if (!state.manualControl.enabled) return;
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+      send({ op: 'set_manual_cmd', linear_x: linearX, angular_z: angularZ });
+    }
+
+    function manualEmergencyStop() {
+      state.manualCmd.linearX = 0.0;
+      state.manualCmd.angularZ = 0.0;
+      sendManualCmd(0.0, 0.0);
+      renderManualStatus();
+    }
+
+    function manualControlTick() {
+      if (!state.manualControl.enabled) return;
+
+      const linearMax = Number(document.getElementById('manualLinearSlider').value || 1.2);
+      const angularMax = Number(document.getElementById('manualAngularSlider').value || 0.2);
+
+      const forward = state.manualKeys.w;
+      const reverse = state.manualKeys.s;
+      const left = state.manualKeys.a;
+      const right = state.manualKeys.d;
+
+      let targetLinear = 0.0;
+      if (forward && !reverse) targetLinear = linearMax;
+      if (reverse && !forward) targetLinear = -linearMax;
+
+      let targetAngular = 0.0;
+      if (left && !right) targetAngular = angularMax;
+      if (right && !left) targetAngular = -angularMax;
+      if (targetLinear < 0.0) targetAngular = -targetAngular;
+
+      state.manualCmd.linearX = rampTowards(
+        state.manualCmd.linearX,
+        targetLinear,
+        MANUAL_LINEAR_STEP_UP,
+        MANUAL_LINEAR_STEP_DOWN
+      );
+      state.manualCmd.angularZ = rampTowards(
+        state.manualCmd.angularZ,
+        targetAngular,
+        MANUAL_ANGULAR_STEP_UP,
+        MANUAL_ANGULAR_STEP_DOWN
+      );
+
+      if (Math.abs(state.manualCmd.linearX) < 1e-3) state.manualCmd.linearX = 0.0;
+      if (Math.abs(state.manualCmd.angularZ) < 1e-3) state.manualCmd.angularZ = 0.0;
+
+      sendManualCmd(state.manualCmd.linearX, state.manualCmd.angularZ);
+      renderManualStatus();
+    }
+
+    function startManualLoop() {
+      stopManualLoop();
+      state.manualLoopTimer = window.setInterval(
+        manualControlTick,
+        Math.round(1000.0 / MANUAL_LOOP_HZ)
+      );
+    }
+
+    function syncManualControlFromServer(manual) {
+      if (!manual || typeof manual !== 'object') return;
+      state.manualControl = {
+        enabled: manual.enabled === true,
+        linear_x_cmd: Number(manual.linear_x_cmd || 0.0),
+        angular_z_cmd: Number(manual.angular_z_cmd || 0.0),
+        last_cmd_age_s: manual.last_cmd_age_s == null ? null : Number(manual.last_cmd_age_s)
+      };
+
+      if (!state.manualControl.enabled) {
+        stopManualLoop();
+        resetManualLocalState();
+      } else if (!state.manualLoopTimer) {
+        startManualLoop();
+      }
+      renderManualStatus();
     }
 
     function send(payload) {
@@ -365,7 +684,9 @@
         return;
       }
       state.ws.send(JSON.stringify(payload));
-      logEvent(payload, 'tx');
+      if (!(payload && payload.op === 'set_manual_cmd')) {
+        logEvent(payload, 'tx');
+      }
     }
 
     function connectWs() {
@@ -381,6 +702,10 @@
       state.ws.onclose = () => {
         state.connected = false;
         setStatus('Disconnected', false);
+        stopManualLoop();
+        resetManualLocalState();
+        state.manualControl.enabled = false;
+        renderManualStatus();
       };
 
       state.ws.onerror = () => {
@@ -395,7 +720,10 @@
           logEvent(`invalid json from server: ${ev.data}`, 'rx');
           return;
         }
-        if (msg.op !== 'nav_telemetry') {
+        if (
+          msg.op !== 'nav_telemetry' &&
+          !(msg.op === 'ack' && msg.request === 'set_manual_cmd')
+        ) {
           logEvent(summarizeIncomingMessage(msg), 'rx');
         }
         handleServerMessage(msg);
@@ -403,9 +731,16 @@
     }
 
     function disconnectWs() {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN && state.manualControl.enabled) {
+        send({ op: 'set_manual_mode', enabled: false });
+      }
       if (state.ws) {
         state.ws.close();
       }
+      stopManualLoop();
+      resetManualLocalState();
+      state.manualControl.enabled = false;
+      renderManualStatus();
     }
 
     function handleServerMessage(msg) {
@@ -421,6 +756,7 @@
         const maskReadyText = maskReady ? 'mask ready' : 'mask not ready';
         setStatus(`state updated (${maskReadyText}, source=${maskSource})`, maskReady);
         updateNavTelemetry({ cmd_vel_safe: msg.cmd_vel_safe });
+        syncManualControlFromServer(msg.manual_control || null);
         return;
       }
 
@@ -431,6 +767,7 @@
 
       if (msg.op === 'nav_telemetry') {
         updateNavTelemetry(msg);
+        syncManualControlFromServer(msg.manual_control || null);
         return;
       }
 
@@ -479,16 +816,29 @@
             goalStatusEl.textContent = `Cancel failed: ${msg.error || 'error'}`;
             goalStatusEl.className = 'status bad';
           }
-        } else if (msg.request === 'brake') {
+        } else if (msg.request === 'set_manual_mode') {
           if (msg.ok) {
-            goalStatusEl.textContent = 'Brake applied';
-            goalStatusEl.className = 'status bad';
-            if (state.goalMarker) {
-              map.removeLayer(state.goalMarker);
-              state.goalMarker = null;
+            const enabled = msg.enabled === true;
+            state.manualControl.enabled = enabled;
+            if (enabled) {
+              goalStatusEl.textContent = 'Manual control enabled';
+              goalStatusEl.className = 'status good';
+              setGoalModeUi(false);
+              startManualLoop();
+            } else {
+              goalStatusEl.textContent = 'Manual control disabled';
+              goalStatusEl.className = 'status';
+              stopManualLoop();
+              resetManualLocalState();
             }
+            renderManualStatus();
           } else {
-            goalStatusEl.textContent = `Brake failed: ${msg.error || 'error'}`;
+            goalStatusEl.textContent = `Manual mode failed: ${msg.error || 'error'}`;
+            goalStatusEl.className = 'status bad';
+          }
+        } else if (msg.request === 'set_manual_cmd') {
+          if (!msg.ok) {
+            goalStatusEl.textContent = `Manual command failed: ${msg.error || 'error'}`;
             goalStatusEl.className = 'status bad';
           }
         } else {
@@ -623,6 +973,10 @@
     }
 
     map.on(L.Draw.Event.CREATED, (e) => {
+      if (!isGpsMainView()) {
+        setStatus('GPS en minimapa: intercambiá a GPS grande para editar zonas', false);
+        return;
+      }
       const layer = e.layer;
       layer.zoneMeta = { id: newZoneId(), type: 'no_go', enabled: true };
       drawnItems.addLayer(layer);
@@ -633,6 +987,10 @@
     });
 
     map.on(L.Draw.Event.EDITED, (e) => {
+      if (!isGpsMainView()) {
+        setStatus('GPS en minimapa: intercambiá a GPS grande para editar zonas', false);
+        return;
+      }
       renderZoneList(buildPreviewDocument());
       if (document.getElementById('autoSync').checked) {
         pushLayersToServer();
@@ -640,6 +998,10 @@
     });
 
     map.on(L.Draw.Event.DELETED, (e) => {
+      if (!isGpsMainView()) {
+        setStatus('GPS en minimapa: intercambiá a GPS grande para editar zonas', false);
+        return;
+      }
       renderZoneList(buildPreviewDocument());
       if (document.getElementById('autoSync').checked) {
         pushLayersToServer();
@@ -647,6 +1009,10 @@
     });
 
     drawnItems.on('click', (evt) => {
+      if (!isGpsMainView()) {
+        setStatus('GPS en minimapa: intercambiá a GPS grande para editar zonas', false);
+        return;
+      }
       const layer = evt.layer;
       if (!layer || !layer.zoneMeta) return;
       const current = layer.zoneMeta;
@@ -673,26 +1039,78 @@
     });
 
     document.getElementById('goalModeBtn').addEventListener('click', () => {
-      state.goalMode = !state.goalMode;
-      const btn = document.getElementById('goalModeBtn');
-      if (state.goalMode) {
-        btn.textContent = 'Set Goal (click map) — ACTIVE';
-        btn.classList.add('active');
-        map.getContainer().style.cursor = 'crosshair';
-      } else {
-        btn.textContent = 'Set Goal (click map)';
-        btn.classList.remove('active');
-        map.getContainer().style.cursor = '';
+      if (state.manualControl.enabled) {
+        setStatus('Disable manual control before setting a goal', false);
+        return;
       }
+      if (!isGpsMainView()) {
+        setStatus('GPS en minimapa: intercambiá a GPS grande para fijar goals', false);
+        return;
+      }
+      setGoalModeUi(!state.goalMode);
     });
 
     document.getElementById('cancelGoalBtn').addEventListener('click', () => {
       send({ op: 'cancel_goal' });
     });
 
-    document.getElementById('brakeBtn').addEventListener('click', () => {
-      send({ op: 'brake' });
+    document.getElementById('manualModeBtn').addEventListener('click', () => {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        setStatus('WebSocket not connected', false);
+        return;
+      }
+      const nextEnabled = !state.manualControl.enabled;
+      send({ op: 'set_manual_mode', enabled: nextEnabled });
     });
+
+    document.getElementById('manualLinearSlider').addEventListener('input', updateManualSliderLabels);
+    document.getElementById('manualAngularSlider').addEventListener('input', updateManualSliderLabels);
+    document.getElementById('swapViewBtn').addEventListener('click', () => {
+      state.primaryView = isGpsMainView() ? 'camera' : 'gps';
+      applyViewMode();
+    });
+
+    window.addEventListener('keydown', (event) => {
+      if (!state.manualControl.enabled) return;
+      if (isTextInputFocused()) return;
+
+      const code = event.code;
+      if (code === 'Space') {
+        event.preventDefault();
+        manualEmergencyStop();
+        return;
+      }
+
+      if (code === 'KeyW' || code === 'KeyA' || code === 'KeyS' || code === 'KeyD') {
+        event.preventDefault();
+      }
+
+      if (event.repeat) return;
+      if (code === 'KeyW') state.manualKeys.w = true;
+      if (code === 'KeyA') state.manualKeys.a = true;
+      if (code === 'KeyS') state.manualKeys.s = true;
+      if (code === 'KeyD') state.manualKeys.d = true;
+      renderManualStatus();
+    });
+
+    window.addEventListener('keyup', (event) => {
+      const code = event.code;
+      if (code === 'KeyW') state.manualKeys.w = false;
+      if (code === 'KeyA') state.manualKeys.a = false;
+      if (code === 'KeyS') state.manualKeys.s = false;
+      if (code === 'KeyD') state.manualKeys.d = false;
+      if (code === 'Space') {
+        manualEmergencyStop();
+      }
+      renderManualStatus();
+    });
+
+    window.addEventListener('beforeunload', () => {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN && state.manualControl.enabled) {
+        state.ws.send(JSON.stringify({ op: 'set_manual_mode', enabled: false }));
+      }
+    });
+
     document.getElementById('snapshotBtn').addEventListener('click', () => {
       send({ op: 'get_nav_snapshot' });
     });
@@ -707,6 +1125,7 @@
 
     map.on('click', (e) => {
       if (!state.goalMode) return;
+      if (!isGpsMainView()) return;
       const { lat, lng } = e.latlng;
 
       // Show marker on map
@@ -717,13 +1136,13 @@
       send({ op: 'set_goal_ll', lat, lon: lng, yaw_deg: 0 });
 
       // Exit goal mode
-      state.goalMode = false;
-      const btn = document.getElementById('goalModeBtn');
-      btn.textContent = 'Set Goal (click map)';
-      btn.classList.remove('active');
-      map.getContainer().style.cursor = '';
+      setGoalModeUi(false);
     });
 
+    document.getElementById('cameraFrame').src = CAMERA_IFRAME_URL;
+    applyViewMode();
+    updateManualSliderLabels();
+    renderManualStatus();
     renderZoneList({ zones: state.lastZones });
   </script>
 </body>

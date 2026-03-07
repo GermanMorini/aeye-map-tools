@@ -52,10 +52,13 @@ class WebZoneServerNode(Node):
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("gps_broadcast_hz", 1.0)
         self.declare_parameter("brake_topic", "/cmd_vel_safe")
+        self.declare_parameter("manual_cmd_topic", "/cmd_vel_safe")
         self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
         self.declare_parameter("nav_telemetry_hz", 5.0)
         self.declare_parameter("brake_publish_count", 5)
         self.declare_parameter("brake_publish_interval_s", 0.1)
+        self.declare_parameter("manual_cmd_timeout_s", 0.4)
+        self.declare_parameter("manual_watchdog_hz", 10.0)
         self.declare_parameter("zones_file", "")
         self.declare_parameter("degrade_enabled", True)
         self.declare_parameter("degrade_radius_m", 2.0)
@@ -92,12 +95,17 @@ class WebZoneServerNode(Node):
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.gps_broadcast_hz = float(self.get_parameter("gps_broadcast_hz").value)
         self.brake_topic = str(self.get_parameter("brake_topic").value)
+        self.manual_cmd_topic = str(self.get_parameter("manual_cmd_topic").value)
         self.cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
         self.nav_telemetry_hz = float(self.get_parameter("nav_telemetry_hz").value)
         self.brake_publish_count = max(1, int(self.get_parameter("brake_publish_count").value))
         self.brake_publish_interval_s = max(
             0.0, float(self.get_parameter("brake_publish_interval_s").value)
         )
+        self.manual_cmd_timeout_s = float(
+            self.get_parameter("manual_cmd_timeout_s").value
+        )
+        self.manual_watchdog_hz = float(self.get_parameter("manual_watchdog_hz").value)
         self.zones_file = self._resolve_zones_file(str(self.get_parameter("zones_file").value))
         self.degrade_enabled = bool(self.get_parameter("degrade_enabled").value)
         self.degrade_radius_m = float(self.get_parameter("degrade_radius_m").value)
@@ -151,6 +159,10 @@ class WebZoneServerNode(Node):
         self._last_plan: Optional[NavPath] = None
         self._last_cmd_vel_safe: Optional[Twist] = None
         self._last_nav_telemetry_monotonic: Optional[float] = None
+        self._manual_enabled = False
+        self._last_manual_cmd = Twist()
+        self._last_manual_cmd_time: Optional[float] = None
+        self._manual_watchdog_stop_sent = False
 
         self._fromll_client = self.create_client(FromLL, self.fromll_service)
         self._global_costmap_client = self.create_client(
@@ -168,6 +180,7 @@ class WebZoneServerNode(Node):
             CostmapFilterInfo, self.filter_info_topic, latched_qos
         )
         self._brake_pub = self.create_publisher(Twist, self.brake_topic, 10)
+        self._manual_cmd_pub = self.create_publisher(Twist, self.manual_cmd_topic, 10)
         self._gps_sub = self.create_subscription(
             NavSatFix, self.gps_topic, self._on_gps_fix, 10
         )
@@ -242,6 +255,9 @@ class WebZoneServerNode(Node):
             self._fixed_mask_info = self._build_fixed_mask_metadata()
 
         self._publish_filter_info()
+        self._manual_watchdog_timer = self.create_timer(
+            1.0 / max(0.1, self.manual_watchdog_hz), self._manual_watchdog_tick
+        )
 
     def _sanitize_degrade_params(self) -> None:
         if self.degrade_radius_m < 0.0:
@@ -349,10 +365,23 @@ class WebZoneServerNode(Node):
                 f"nav_telemetry_hz={self.nav_telemetry_hz} is invalid; forcing 5.0"
             )
             self.nav_telemetry_hz = 5.0
+        if self.manual_cmd_timeout_s <= 0.0 or not np.isfinite(self.manual_cmd_timeout_s):
+            self.get_logger().warning(
+                f"manual_cmd_timeout_s={self.manual_cmd_timeout_s} is invalid; forcing 0.4"
+            )
+            self.manual_cmd_timeout_s = 0.4
+        if self.manual_watchdog_hz <= 0.0 or not np.isfinite(self.manual_watchdog_hz):
+            self.get_logger().warning(
+                f"manual_watchdog_hz={self.manual_watchdog_hz} is invalid; forcing 10.0"
+            )
+            self.manual_watchdog_hz = 10.0
         self.get_logger().info(
             "Navigation telemetry params: "
             f"cmd_vel_topic={self.cmd_vel_safe_topic}, "
-            f"broadcast_hz={self.nav_telemetry_hz:.2f}"
+            f"broadcast_hz={self.nav_telemetry_hz:.2f}, "
+            f"manual_topic={self.manual_cmd_topic}, "
+            f"manual_timeout_s={self.manual_cmd_timeout_s:.2f}, "
+            f"manual_watchdog_hz={self.manual_watchdog_hz:.2f}"
         )
 
     def _build_fixed_mask_metadata(self) -> MapMetaData:
@@ -386,6 +415,7 @@ class WebZoneServerNode(Node):
     def snapshot_state(self) -> Dict[str, Any]:
         with self._lock:
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
+            manual_control = self._manual_control_payload_locked()
             return {
                 "op": "state",
                 "ok": True,
@@ -395,6 +425,7 @@ class WebZoneServerNode(Node):
                 "mask_source": self._mask_source,
                 "robot_pose": self._last_robot_pose,
                 "cmd_vel_safe": cmd_vel_safe,
+                "manual_control": manual_control,
             }
 
     def _cmd_vel_safe_payload_locked(self) -> Dict[str, Any]:
@@ -411,12 +442,25 @@ class WebZoneServerNode(Node):
             "angular_z": float(msg.angular.z),
         }
 
+    def _manual_control_payload_locked(self) -> Dict[str, Any]:
+        age_s: Optional[float] = None
+        if self._last_manual_cmd_time is not None:
+            age_s = max(0.0, float(time.monotonic() - self._last_manual_cmd_time))
+        return {
+            "enabled": bool(self._manual_enabled),
+            "linear_x_cmd": float(self._last_manual_cmd.linear.x),
+            "angular_z_cmd": float(self._last_manual_cmd.angular.z),
+            "last_cmd_age_s": age_s,
+        }
+
     def _build_nav_telemetry_payload(self) -> Dict[str, Any]:
         with self._lock:
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
+            manual_control = self._manual_control_payload_locked()
         return {
             "op": "nav_telemetry",
             "cmd_vel_safe": cmd_vel_safe,
+            "manual_control": manual_control,
         }
 
     def _broadcast_nav_telemetry(self, force: bool = False) -> None:
@@ -466,6 +510,85 @@ class WebZoneServerNode(Node):
         with self._lock:
             self._last_cmd_vel_safe = msg
         self._broadcast_nav_telemetry(force=False)
+
+    def _publish_manual_twist(self, linear_x: float, angular_z: float) -> None:
+        cmd = Twist()
+        cmd.linear.x = float(linear_x)
+        cmd.angular.z = float(angular_z)
+        self._manual_cmd_pub.publish(cmd)
+
+    def _publish_manual_stop(self) -> None:
+        self._publish_manual_twist(0.0, 0.0)
+
+    def is_manual_enabled(self) -> bool:
+        with self._lock:
+            return bool(self._manual_enabled)
+
+    def set_manual_mode(self, enabled: bool) -> Tuple[bool, str]:
+        if enabled:
+            if self._current_goal_handle is not None:
+                cancel_ok, cancel_msg = self.cancel_current_goal()
+                if not cancel_ok:
+                    self.get_logger().warning(
+                        f"Manual mode: failed to cancel goal ({cancel_msg}), continuing with manual override"
+                    )
+            with self._lock:
+                self._manual_enabled = True
+                self._last_manual_cmd = Twist()
+                self._last_manual_cmd_time = None
+                self._manual_watchdog_stop_sent = False
+            self._publish_manual_stop()
+            self.get_logger().warning(
+                f"Manual control enabled (topic={self.manual_cmd_topic})"
+            )
+            self._broadcast_nav_telemetry(force=True)
+            return True, "manual control enabled"
+
+        with self._lock:
+            self._manual_enabled = False
+            self._last_manual_cmd = Twist()
+            self._last_manual_cmd_time = None
+            self._manual_watchdog_stop_sent = False
+        self._publish_manual_stop()
+        self.get_logger().warning("Manual control disabled")
+        self._broadcast_nav_telemetry(force=True)
+        return True, "manual control disabled"
+
+    def set_manual_cmd(self, linear_x: float, angular_z: float) -> Tuple[bool, str]:
+        if not np.isfinite(linear_x) or not np.isfinite(angular_z):
+            return False, "invalid manual command values"
+        now = time.monotonic()
+        with self._lock:
+            if not self._manual_enabled:
+                return False, "manual control is disabled"
+            self._last_manual_cmd.linear.x = float(linear_x)
+            self._last_manual_cmd.angular.z = float(angular_z)
+            self._last_manual_cmd_time = now
+            self._manual_watchdog_stop_sent = False
+        self._publish_manual_twist(linear_x, angular_z)
+        self._broadcast_nav_telemetry(force=False)
+        return True, "manual command published"
+
+    def _manual_watchdog_tick(self) -> None:
+        with self._lock:
+            enabled = bool(self._manual_enabled)
+            last_cmd_time = self._last_manual_cmd_time
+            stop_sent = bool(self._manual_watchdog_stop_sent)
+
+        if not enabled:
+            return
+
+        now = time.monotonic()
+        stale = (
+            (last_cmd_time is None)
+            or ((now - last_cmd_time) > float(self.manual_cmd_timeout_s))
+        )
+        if stale and (not stop_sent):
+            self._publish_manual_stop()
+            with self._lock:
+                self._last_manual_cmd = Twist()
+                self._manual_watchdog_stop_sent = True
+            self._broadcast_nav_telemetry(force=False)
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
         if not np.isfinite(msg.latitude) or not np.isfinite(msg.longitude):
@@ -1412,6 +1535,18 @@ class WebSocketApi:
             return
 
         if op == "set_goal_ll":
+            if self.node.is_manual_enabled():
+                await ws.send(
+                    json.dumps(
+                        {
+                            "op": "ack",
+                            "ok": False,
+                            "request": "set_goal_ll",
+                            "error": "manual control enabled; disable manual mode to send goals",
+                        }
+                    )
+                )
+                return
             try:
                 lat = float(msg["lat"])
                 lon = float(msg["lon"])
@@ -1434,6 +1569,67 @@ class WebSocketApi:
                     "request": "set_goal_ll",
                     "error": None if ok else err
                 })
+            )
+            return
+
+        if op == "set_manual_mode":
+            enabled_raw = msg.get("enabled")
+            if not isinstance(enabled_raw, bool):
+                await ws.send(
+                    json.dumps(
+                        {
+                            "op": "ack",
+                            "ok": False,
+                            "request": "set_manual_mode",
+                            "error": "enabled must be boolean",
+                        }
+                    )
+                )
+                return
+            ok, err = await asyncio.to_thread(self.node.set_manual_mode, enabled_raw)
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "ack",
+                        "ok": ok,
+                        "request": "set_manual_mode",
+                        "enabled": bool(enabled_raw) if ok else self.node.is_manual_enabled(),
+                        "error": None if ok else err,
+                    }
+                )
+            )
+            if ok:
+                await self.node._broadcast(self.node.snapshot_state())
+            return
+
+        if op == "set_manual_cmd":
+            try:
+                linear_x = float(msg["linear_x"])
+                angular_z = float(msg["angular_z"])
+            except (KeyError, ValueError, TypeError) as e:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "op": "ack",
+                            "ok": False,
+                            "request": "set_manual_cmd",
+                            "error": f"invalid parameters: {str(e)}",
+                        }
+                    )
+                )
+                return
+            ok, err = await asyncio.to_thread(
+                self.node.set_manual_cmd, linear_x, angular_z
+            )
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "ack",
+                        "ok": ok,
+                        "request": "set_manual_cmd",
+                        "error": None if ok else err,
+                    }
+                )
             )
             return
 
