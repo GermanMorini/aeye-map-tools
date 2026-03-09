@@ -351,27 +351,20 @@
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
   <script>
     const CAMERA_IFRAME_URL = '';
-    const map = L.map('map', { zoomControl: true }).setView([-31.421785, -64.102448], 18);
-    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 22,
-      attribution: '&copy; OpenStreetMap contributors'
-    });
+    const GPS_MAX_ZOOM = 22;
+    const GPS_DEFAULT_ZOOM = GPS_MAX_ZOOM - 3;
+    const map = L.map('map', { zoomControl: true }).setView(
+      [-31.421785, -64.102448],
+      GPS_DEFAULT_ZOOM
+    );
     const satelliteLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {
-        maxZoom: 22,
+        maxZoom: GPS_MAX_ZOOM,
         attribution: 'Tiles &copy; Esri'
       }
     );
-    osmLayer.addTo(map);
-    L.control.layers(
-      {
-        'OpenStreetMap': osmLayer,
-        'Satellite (Esri)': satelliteLayer
-      },
-      {},
-      { collapsed: false }
-    ).addTo(map);
+    satelliteLayer.addTo(map);
 
     const drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
@@ -416,10 +409,6 @@
     };
 
     const MANUAL_LOOP_HZ = 20.0;
-    const MANUAL_LINEAR_STEP_UP = 0.10;
-    const MANUAL_LINEAR_STEP_DOWN = 0.16;
-    const MANUAL_ANGULAR_STEP_UP = 0.03;
-    const MANUAL_ANGULAR_STEP_DOWN = 0.05;
 
     const goalIcon = L.divIcon({
       className: '',
@@ -605,14 +594,6 @@
       state.manualCmd.angularZ = 0.0;
     }
 
-    function rampTowards(current, target, stepUp, stepDown) {
-      const delta = target - current;
-      if (Math.abs(delta) < 1e-6) return target;
-      const step = (Math.abs(target) > Math.abs(current)) ? stepUp : stepDown;
-      if (Math.abs(delta) <= step) return target;
-      return current + Math.sign(delta) * step;
-    }
-
     function sendManualCmd(linearX, angularZ) {
       if (!state.manualControl.enabled) return;
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
@@ -646,18 +627,8 @@
       if (right && !left) targetAngular = -angularMax;
       if (targetLinear < 0.0) targetAngular = -targetAngular;
 
-      state.manualCmd.linearX = rampTowards(
-        state.manualCmd.linearX,
-        targetLinear,
-        MANUAL_LINEAR_STEP_UP,
-        MANUAL_LINEAR_STEP_DOWN
-      );
-      state.manualCmd.angularZ = rampTowards(
-        state.manualCmd.angularZ,
-        targetAngular,
-        MANUAL_ANGULAR_STEP_UP,
-        MANUAL_ANGULAR_STEP_DOWN
-      );
+      state.manualCmd.linearX = targetLinear;
+      state.manualCmd.angularZ = targetAngular;
 
       if (Math.abs(state.manualCmd.linearX) < 1e-3) state.manualCmd.linearX = 0.0;
       if (Math.abs(state.manualCmd.angularZ) < 1e-3) state.manualCmd.angularZ = 0.0;
@@ -1046,7 +1017,7 @@
     document.getElementById('refreshBtn').addEventListener('click', () => send({ op: 'get_state' }));
     document.getElementById('pushBtn').addEventListener('click', pushLayersToServer);
     document.getElementById('saveBtn').addEventListener('click', pushLayersToServer);
-    document.getElementById('loadBtn').addEventListener('click', () => send({ op: 'get_state' }));
+    document.getElementById('loadBtn').addEventListener('click', () => send({ op: 'load_zones_file' }));
     document.getElementById('clearBtn').addEventListener('click', () => {
       drawnItems.clearLayers();
       pushLayersToServer();

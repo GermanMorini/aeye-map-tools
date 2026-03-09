@@ -17,8 +17,8 @@ def generate_launch_description():
     nav_cancel_goal_service = LaunchConfiguration("nav_cancel_goal_service")
     nav_brake_service = LaunchConfiguration("nav_brake_service")
     nav_set_manual_mode_service = LaunchConfiguration("nav_set_manual_mode_service")
-    nav_set_manual_cmd_service = LaunchConfiguration("nav_set_manual_cmd_service")
     nav_get_state_service = LaunchConfiguration("nav_get_state_service")
+    teleop_cmd_topic = LaunchConfiguration("teleop_cmd_topic")
 
     nav_snapshot_service = LaunchConfiguration("nav_snapshot_service")
     nav_telemetry_topic = LaunchConfiguration("nav_telemetry_topic")
@@ -54,8 +54,8 @@ def generate_launch_description():
                 default_value="/nav_command_server/set_manual_mode",
             ),
             DeclareLaunchArgument(
-                "nav_set_manual_cmd_service",
-                default_value="/nav_command_server/set_manual_cmd",
+                "teleop_cmd_topic",
+                default_value="/cmd_vel_teleop",
             ),
             DeclareLaunchArgument(
                 "nav_get_state_service", default_value="/nav_command_server/get_state"
@@ -89,8 +89,8 @@ def generate_launch_description():
                         "nav_cancel_goal_service": nav_cancel_goal_service,
                         "nav_brake_service": nav_brake_service,
                         "nav_set_manual_mode_service": nav_set_manual_mode_service,
-                        "nav_set_manual_cmd_service": nav_set_manual_cmd_service,
                         "nav_get_state_service": nav_get_state_service,
+                        "teleop_cmd_topic": teleop_cmd_topic,
                         "nav_snapshot_service": nav_snapshot_service,
                         "nav_telemetry_topic": nav_telemetry_topic,
                         "request_timeout_s": request_timeout_s,

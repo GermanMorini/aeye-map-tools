@@ -8,9 +8,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 import rclpy
 import websockets
+from geometry_msgs.msg import Twist
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix
+from std_srvs.srv import Trigger
 
 from navegacion_gps_interfaces.msg import NavTelemetry, NoGoPoint, NoGoZone
 from navegacion_gps_interfaces.srv import (
@@ -20,7 +22,6 @@ from navegacion_gps_interfaces.srv import (
     GetNavSnapshot,
     GetNavState,
     SetKeepoutZones,
-    SetManualCmd,
     SetManualMode,
     SetNavGoalLL,
 )
@@ -43,13 +44,14 @@ class WebZoneServerNode(Node):
 
         self.declare_parameter("keepout_set_zones_service", "/keepout_manager/set_zones")
         self.declare_parameter("keepout_get_state_service", "/keepout_manager/get_state")
+        self.declare_parameter("keepout_reload_zones_service", "/keepout_manager/reload_zones")
 
         self.declare_parameter("nav_set_goal_service", "/nav_command_server/set_goal_ll")
         self.declare_parameter("nav_cancel_goal_service", "/nav_command_server/cancel_goal")
         self.declare_parameter("nav_brake_service", "/nav_command_server/brake")
         self.declare_parameter("nav_set_manual_mode_service", "/nav_command_server/set_manual_mode")
-        self.declare_parameter("nav_set_manual_cmd_service", "/nav_command_server/set_manual_cmd")
         self.declare_parameter("nav_get_state_service", "/nav_command_server/get_state")
+        self.declare_parameter("teleop_cmd_topic", "/cmd_vel_teleop")
 
         self.declare_parameter("nav_snapshot_service", "/nav_snapshot_server/get_nav_snapshot")
         self.declare_parameter("nav_telemetry_topic", "/nav_command_server/telemetry")
@@ -76,6 +78,9 @@ class WebZoneServerNode(Node):
         self.keepout_get_state_service = str(
             self.get_parameter("keepout_get_state_service").value
         )
+        self.keepout_reload_zones_service = str(
+            self.get_parameter("keepout_reload_zones_service").value
+        )
 
         self.nav_set_goal_service = str(self.get_parameter("nav_set_goal_service").value)
         self.nav_cancel_goal_service = str(
@@ -85,10 +90,8 @@ class WebZoneServerNode(Node):
         self.nav_set_manual_mode_service = str(
             self.get_parameter("nav_set_manual_mode_service").value
         )
-        self.nav_set_manual_cmd_service = str(
-            self.get_parameter("nav_set_manual_cmd_service").value
-        )
         self.nav_get_state_service = str(self.get_parameter("nav_get_state_service").value)
+        self.teleop_cmd_topic = str(self.get_parameter("teleop_cmd_topic").value)
 
         self.nav_snapshot_service = str(self.get_parameter("nav_snapshot_service").value)
         self.nav_telemetry_topic = str(self.get_parameter("nav_telemetry_topic").value)
@@ -131,6 +134,9 @@ class WebZoneServerNode(Node):
         self._keepout_get_state_client = self.create_client(
             GetKeepoutState, self.keepout_get_state_service
         )
+        self._keepout_reload_zones_client = self.create_client(
+            Trigger, self.keepout_reload_zones_service
+        )
         self._nav_set_goal_client = self.create_client(SetNavGoalLL, self.nav_set_goal_service)
         self._nav_cancel_goal_client = self.create_client(
             CancelNavGoal, self.nav_cancel_goal_service
@@ -139,15 +145,14 @@ class WebZoneServerNode(Node):
         self._nav_set_manual_mode_client = self.create_client(
             SetManualMode, self.nav_set_manual_mode_service
         )
-        self._nav_set_manual_cmd_client = self.create_client(
-            SetManualCmd, self.nav_set_manual_cmd_service
-        )
+        self._teleop_cmd_pub = self.create_publisher(Twist, self.teleop_cmd_topic, 10)
         self._nav_get_state_client = self.create_client(GetNavState, self.nav_get_state_service)
         self._nav_snapshot_client = self.create_client(GetNavSnapshot, self.nav_snapshot_service)
         self.get_logger().info(
             "Web gateway ready "
             f"(ws={self.ws_host}:{self.ws_port}, keepout_set={self.keepout_set_zones_service}, "
-            f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service})"
+            f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service}, "
+            f"teleop_topic={self.teleop_cmd_topic})"
         )
 
     def add_client(self, ws: Any) -> None:
@@ -365,6 +370,23 @@ class WebZoneServerNode(Node):
         self.get_logger().info(f"set_keepout_zones ok (published={bool(res.published)})")
         return True, "", bool(res.published)
 
+    def reload_keepout_zones(self) -> Tuple[bool, str]:
+        self.get_logger().info("WS->ROS reload_keepout_zones")
+        req = Trigger.Request()
+        res = self._call_service(
+            self._keepout_reload_zones_client,
+            req,
+            self.set_zones_timeout_s,
+        )
+        if res is None:
+            return False, "keepout reload_zones timeout"
+        if not res.success:
+            return False, str(res.message or "reload failed")
+        ok_state, err_state = self.get_keepout_state()
+        if not ok_state:
+            return False, err_state
+        return True, ""
+
     def get_nav_state(self) -> Tuple[bool, str]:
         req = GetNavState.Request()
         res = self._call_service(self._nav_get_state_client, req, self.request_timeout_s)
@@ -417,12 +439,18 @@ class WebZoneServerNode(Node):
         return bool(res.ok), str(res.error), bool(res.enabled_after)
 
     def set_manual_cmd(self, linear_x: float, angular_z: float) -> Tuple[bool, str]:
-        req = SetManualCmd.Request()
-        req.linear_x = float(linear_x)
-        req.angular_z = float(angular_z)
-        res = self._call_service(self._nav_set_manual_cmd_client, req, self.request_timeout_s)
-        if res is None:
-            return False, "set_manual_cmd timeout"
+        if not np.isfinite(linear_x) or not np.isfinite(angular_z):
+            return False, "invalid manual command values"
+
+        with self._lock:
+            manual_enabled = bool(self._manual_control.get("enabled", False))
+        if not manual_enabled:
+            return False, "manual control is disabled"
+
+        cmd = Twist()
+        cmd.linear.x = float(linear_x)
+        cmd.angular.z = float(angular_z)
+        self._teleop_cmd_pub.publish(cmd)
 
         with self._lock:
             self._manual_cmd_last_monotonic = time.monotonic()
@@ -430,7 +458,7 @@ class WebZoneServerNode(Node):
             self._manual_control["angular_z_cmd"] = float(angular_z)
             self._manual_control["last_cmd_age_s"] = 0.0
 
-        return bool(res.ok), str(res.error)
+        return True, ""
 
     def get_nav_snapshot(self) -> Tuple[bool, str, Dict[str, Any]]:
         started = time.perf_counter()
@@ -551,6 +579,23 @@ class WebSocketApi:
                         "request": "set_zones_ll",
                         "error": None if ok else err,
                         "published": bool(published),
+                    }
+                )
+            )
+            if ok:
+                await self.node._broadcast(self.node.snapshot_state())
+            return
+
+        if op == "load_zones_file":
+            ok, err = await asyncio.to_thread(self.node.reload_keepout_zones)
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "ack",
+                        "ok": ok,
+                        "request": "load_zones_file",
+                        "error": None if ok else err,
+                        "published": bool(ok),
                     }
                 )
             )
