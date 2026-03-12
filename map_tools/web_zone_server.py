@@ -17,6 +17,8 @@ from std_srvs.srv import Trigger
 from navegacion_gps_interfaces.msg import NavTelemetry, NoGoPoint, NoGoZone
 from navegacion_gps_interfaces.srv import (
     BrakeNav,
+    CameraPan,
+    CameraStatus,
     CancelNavGoal,
     GetKeepoutState,
     GetNavSnapshot,
@@ -55,6 +57,8 @@ class WebZoneServerNode(Node):
 
         self.declare_parameter("nav_snapshot_service", "/nav_snapshot_server/get_nav_snapshot")
         self.declare_parameter("nav_telemetry_topic", "/nav_command_server/telemetry")
+        self.declare_parameter("camera_pan_service", "/camara/camera_pan")
+        self.declare_parameter("camera_status_service", "/camara/camera_status")
 
         self.ws_host = str(self.get_parameter("ws_host").value)
         self.ws_port = int(self.get_parameter("ws_port").value)
@@ -95,6 +99,8 @@ class WebZoneServerNode(Node):
 
         self.nav_snapshot_service = str(self.get_parameter("nav_snapshot_service").value)
         self.nav_telemetry_topic = str(self.get_parameter("nav_telemetry_topic").value)
+        self.camera_pan_service = str(self.get_parameter("camera_pan_service").value)
+        self.camera_status_service = str(self.get_parameter("camera_status_service").value)
 
         self._lock = threading.Lock()
         self._ws_clients: Set[Any] = set()
@@ -118,6 +124,12 @@ class WebZoneServerNode(Node):
             "last_cmd_age_s": None,
         }
         self._goal_active = False
+        self._camera_status = {
+            "ok": False,
+            "error": "camera status unavailable",
+            "last_command": "none",
+            "zoom_in": False,
+        }
 
         self._manual_cmd_last_monotonic: Optional[float] = None
 
@@ -148,10 +160,15 @@ class WebZoneServerNode(Node):
         self._teleop_cmd_pub = self.create_publisher(Twist, self.teleop_cmd_topic, 10)
         self._nav_get_state_client = self.create_client(GetNavState, self.nav_get_state_service)
         self._nav_snapshot_client = self.create_client(GetNavSnapshot, self.nav_snapshot_service)
+        self._camera_pan_client = self.create_client(CameraPan, self.camera_pan_service)
+        self._camera_status_client = self.create_client(
+            CameraStatus, self.camera_status_service
+        )
         self.get_logger().info(
             "Web gateway ready "
             f"(ws={self.ws_host}:{self.ws_port}, keepout_set={self.keepout_set_zones_service}, "
             f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service}, "
+            f"camera_pan={self.camera_pan_service}, camera_status={self.camera_status_service}, "
             f"teleop_topic={self.teleop_cmd_topic})"
         )
 
@@ -180,6 +197,7 @@ class WebZoneServerNode(Node):
                 "cmd_vel_safe": dict(self._cmd_vel_safe),
                 "manual_control": dict(self._manual_control),
                 "goal_active": bool(self._goal_active),
+                "camera_status": dict(self._camera_status),
             }
 
     def _build_nav_telemetry_payload(self) -> Dict[str, Any]:
@@ -504,6 +522,55 @@ class WebZoneServerNode(Node):
         )
         return True, "", payload
 
+    def camera_pan(self, command: str) -> Tuple[bool, str, str]:
+        req = CameraPan.Request()
+        req.command = str(command)
+        res = self._call_service(self._camera_pan_client, req, self.request_timeout_s)
+        if res is None:
+            return False, "camera_pan timeout", ""
+
+        applied = str(res.applied_command)
+        if res.ok:
+            with self._lock:
+                self._camera_status["ok"] = True
+                self._camera_status["error"] = ""
+                if applied:
+                    self._camera_status["last_command"] = applied
+        else:
+            with self._lock:
+                self._camera_status["ok"] = False
+                self._camera_status["error"] = str(res.error)
+        return bool(res.ok), str(res.error), applied
+
+    def get_camera_status(self) -> Tuple[bool, str, Dict[str, Any]]:
+        req = CameraStatus.Request()
+        res = self._call_service(self._camera_status_client, req, self.request_timeout_s)
+        if res is None:
+            payload = {
+                "op": "camera_status",
+                "ok": False,
+                "error": "camera_status timeout",
+                "last_command": "",
+                "zoom_in": False,
+            }
+            return False, payload["error"], payload
+
+        payload = {
+            "op": "camera_status",
+            "ok": bool(res.ok),
+            "error": str(res.error),
+            "last_command": str(res.last_command),
+            "zoom_in": bool(res.zoom_in),
+        }
+        with self._lock:
+            self._camera_status = {
+                "ok": bool(res.ok),
+                "error": str(res.error),
+                "last_command": str(res.last_command),
+                "zoom_in": bool(res.zoom_in),
+            }
+        return bool(res.ok), str(res.error), payload
+
     def bootstrap_backend_state(self) -> None:
         self.get_logger().info("Bootstrapping gateway state from backend services...")
         ok_k, err_k = self.get_keepout_state()
@@ -512,6 +579,9 @@ class WebZoneServerNode(Node):
         ok_n, err_n = self.get_nav_state()
         if not ok_n and err_n:
             self.get_logger().warning(f"nav bootstrap failed: {err_n}")
+        ok_c, err_c, _ = self.get_camera_status()
+        if not ok_c and err_c:
+            self.get_logger().warning(f"camera bootstrap failed: {err_c}")
         self.get_logger().info("Gateway bootstrap finished")
 
 
@@ -741,6 +811,52 @@ class WebSocketApi:
                     }
                 )
             )
+            return
+
+        if op == "camera_pan":
+            command = str(msg.get("command", "")).strip()
+            if not command:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "op": "ack",
+                            "ok": False,
+                            "request": "camera_pan",
+                            "error": "command is required",
+                        }
+                    )
+                )
+                return
+            ok, err, _ = await asyncio.to_thread(self.node.camera_pan, command)
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "ack",
+                        "ok": ok,
+                        "request": "camera_pan",
+                        "error": None if ok else err,
+                    }
+                )
+            )
+            return
+
+        if op == "camera_zoom_toggle":
+            ok, err, _ = await asyncio.to_thread(self.node.camera_pan, "zoom_toggle")
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "ack",
+                        "ok": ok,
+                        "request": "camera_zoom_toggle",
+                        "error": None if ok else err,
+                    }
+                )
+            )
+            return
+
+        if op == "get_camera_status":
+            _, _, payload = await asyncio.to_thread(self.node.get_camera_status)
+            await ws.send(json.dumps(payload))
             return
 
         await ws.send(

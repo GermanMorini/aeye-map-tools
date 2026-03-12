@@ -22,6 +22,8 @@ def generate_launch_description():
 
     nav_snapshot_service = LaunchConfiguration("nav_snapshot_service")
     nav_telemetry_topic = LaunchConfiguration("nav_telemetry_topic")
+    camera_pan_service = LaunchConfiguration("camera_pan_service")
+    camera_status_service = LaunchConfiguration("camera_status_service")
 
     request_timeout_s = LaunchConfiguration("request_timeout_s")
     snapshot_request_timeout_s = LaunchConfiguration("snapshot_request_timeout_s")
@@ -68,6 +70,14 @@ def generate_launch_description():
                 "nav_telemetry_topic",
                 default_value="/nav_command_server/telemetry",
             ),
+            DeclareLaunchArgument(
+                "camera_pan_service",
+                default_value="/camara/camera_pan",
+            ),
+            DeclareLaunchArgument(
+                "camera_status_service",
+                default_value="/camara/camera_status",
+            ),
             DeclareLaunchArgument("request_timeout_s", default_value="5.0"),
             DeclareLaunchArgument("snapshot_request_timeout_s", default_value="2.0"),
             DeclareLaunchArgument("set_zones_timeout_s", default_value="12.0"),
@@ -93,6 +103,8 @@ def generate_launch_description():
                         "teleop_cmd_topic": teleop_cmd_topic,
                         "nav_snapshot_service": nav_snapshot_service,
                         "nav_telemetry_topic": nav_telemetry_topic,
+                        "camera_pan_service": camera_pan_service,
+                        "camera_status_service": camera_status_service,
                         "request_timeout_s": request_timeout_s,
                         "snapshot_request_timeout_s": snapshot_request_timeout_s,
                         "set_zones_timeout_s": set_zones_timeout_s,

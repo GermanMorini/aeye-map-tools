@@ -192,6 +192,22 @@
     .badge { padding: 2px 6px; border-radius: 999px; font-size: 11px; }
     .on { background: #14532d; color: #dcfce7; }
     .off { background: #3f3f46; color: #e4e4e7; }
+    .ptz-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .ptz-grid button {
+      width: 100%;
+      text-align: center;
+      font-weight: 700;
+      background: #334155;
+      border: 1px solid #475569;
+      color: #e2e8f0;
+    }
+    .ptz-grid button:hover {
+      background: #475569;
+    }
     pre {
       margin: 0;
       max-height: 200px;
@@ -323,6 +339,24 @@
         <div id="manualStatus" class="status">Manual: OFF · keys=- · vx_cmd=0.00 · wz_cmd=0.00</div>
       </div>
 
+      <h2>Camera PTZ</h2>
+      <div class="stack">
+        <div class="ptz-grid">
+          <button id="ptz_angle_135" class="secondary" type="button">⇖</button>
+          <button id="ptz_angle_90" class="secondary" type="button">⇑</button>
+          <button id="ptz_angle_45" class="secondary" type="button">⇗</button>
+
+          <button id="ptz_angle_180" class="secondary" type="button">⇐</button>
+          <button id="ptz_center_zoom" class="secondary" type="button">🔍</button>
+          <button id="ptz_angle_0" class="secondary" type="button">⇒</button>
+
+          <button id="ptz_angle_m135" class="secondary" type="button">⇙</button>
+          <button id="ptz_angle_m90" class="secondary" type="button">⇓</button>
+          <button id="ptz_angle_m45" class="secondary" type="button">⇘</button>
+        </div>
+        <div id="cameraStatus" class="status">camera: n/a</div>
+      </div>
+
     </div>
 
     <div id="viewStage" class="mode-camera-main">
@@ -402,6 +436,9 @@
       lastGoal: null,
       lastSnapshot: null,
       cmdVelSafe: null,
+      cameraStatus: { ok: false, error: 'camera status unavailable', last_command: 'none', zoom_in: false },
+      cameraArrowKeys: { up: false, down: false, left: false, right: false },
+      cameraArrowTimer: null,
       manualControl: { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0, last_cmd_age_s: null },
       manualKeys: { w: false, a: false, s: false, d: false },
       manualCmd: { linearX: 0.0, angularZ: 0.0 },
@@ -517,7 +554,37 @@
             : null
         };
       }
+      if (msg && msg.op === 'camera_status') {
+        return {
+          op: msg.op,
+          ok: msg.ok,
+          last_command: msg.last_command,
+          zoom_in: msg.zoom_in,
+          error: msg.error || null
+        };
+      }
       return msg;
+    }
+
+    function updateCameraStatusUi(payload) {
+      const el = document.getElementById('cameraStatus');
+      const status = payload && typeof payload === 'object' ? payload : {};
+      state.cameraStatus = {
+        ok: status.ok === true,
+        error: String(status.error || ''),
+        last_command: String(status.last_command || 'none'),
+        zoom_in: status.zoom_in === true
+      };
+
+      if (state.cameraStatus.ok) {
+        const zoomText = state.cameraStatus.zoom_in ? 'IN' : 'OUT';
+        el.textContent = `camera: ok · last=${state.cameraStatus.last_command} · zoom=${zoomText}`;
+        el.className = 'status good';
+      } else {
+        const err = state.cameraStatus.error || 'camera unavailable';
+        el.textContent = `camera: ${err}`;
+        el.className = 'status bad';
+      }
     }
 
     function updateNavTelemetry(payload) {
@@ -674,6 +741,38 @@
       }
     }
 
+    function cameraCommandFromArrowSnapshot(keys) {
+      if (keys.up && keys.left) return 'angle_135';
+      if (keys.up && keys.right) return 'angle_45';
+      if (keys.down && keys.left) return 'angle_m135';
+      if (keys.down && keys.right) return 'angle_m45';
+      if (keys.up) return 'angle_90';
+      if (keys.down) return 'angle_m90';
+      if (keys.left) return 'angle_180';
+      if (keys.right) return 'angle_0';
+      return null;
+    }
+
+    function scheduleCameraArrowCommand() {
+      if (state.cameraArrowTimer) {
+        window.clearTimeout(state.cameraArrowTimer);
+        state.cameraArrowTimer = null;
+      }
+      const snapshot = {
+        up: state.cameraArrowKeys.up,
+        down: state.cameraArrowKeys.down,
+        left: state.cameraArrowKeys.left,
+        right: state.cameraArrowKeys.right,
+      };
+      state.cameraArrowTimer = window.setTimeout(() => {
+        state.cameraArrowTimer = null;
+        const command = cameraCommandFromArrowSnapshot(snapshot);
+        if (command) {
+          send({ op: 'camera_pan', command });
+        }
+      }, 90);
+    }
+
     function connectWs() {
       const url = document.getElementById('wsUrl').value.trim();
       state.ws = new WebSocket(url);
@@ -682,6 +781,7 @@
         state.connected = true;
         setStatus(`Connected to ${url}`, true);
         send({ op: 'get_state' });
+        send({ op: 'get_camera_status' });
       };
 
       state.ws.onclose = () => {
@@ -691,6 +791,7 @@
         resetManualLocalState();
         state.manualControl.enabled = false;
         renderManualStatus();
+        updateCameraStatusUi({ ok: false, error: 'disconnected', last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
       };
 
       state.ws.onerror = () => {
@@ -742,6 +843,9 @@
         setStatus(`state updated (${maskReadyText}, source=${maskSource})`, maskReady);
         updateNavTelemetry({ cmd_vel_safe: msg.cmd_vel_safe });
         syncManualControlFromServer(msg.manual_control || null);
+        if (msg.camera_status) {
+          updateCameraStatusUi(msg.camera_status);
+        }
         return;
       }
 
@@ -776,6 +880,11 @@
         }
         metaEl.textContent = `Snapshot error: ${msg.error || 'unknown error'}`;
         document.getElementById('snapshotModal').classList.add('show');
+        return;
+      }
+
+      if (msg.op === 'camera_status') {
+        updateCameraStatusUi(msg);
         return;
       }
 
@@ -825,6 +934,17 @@
           if (!msg.ok) {
             goalStatusEl.textContent = `Manual command failed: ${msg.error || 'error'}`;
             goalStatusEl.className = 'status bad';
+          }
+        } else if (msg.request === 'camera_pan' || msg.request === 'camera_zoom_toggle') {
+          if (msg.ok) {
+            send({ op: 'get_camera_status' });
+          } else {
+            updateCameraStatusUi({
+              ok: false,
+              error: String(msg.error || 'camera command failed'),
+              last_command: state.cameraStatus.last_command,
+              zoom_in: state.cameraStatus.zoom_in
+            });
           }
         } else {
           if (msg.ok) {
@@ -1076,10 +1196,35 @@
     });
 
     window.addEventListener('keydown', (event) => {
-      if (!state.manualControl.enabled) return;
       if (isTextInputFocused()) return;
 
       const code = event.code;
+      const cameraArrowByCode = {
+        ArrowUp: 'up',
+        ArrowDown: 'down',
+        ArrowLeft: 'left',
+        ArrowRight: 'right',
+      };
+      const arrowKey = cameraArrowByCode[code];
+      if (arrowKey) {
+        event.preventDefault();
+        state.cameraArrowKeys[arrowKey] = true;
+        if (!event.repeat) {
+          scheduleCameraArrowCommand();
+        }
+        return;
+      }
+
+      if (!event.repeat) {
+        if (code === 'Minus' || code === 'NumpadSubtract') {
+          event.preventDefault();
+          send({ op: 'camera_zoom_toggle' });
+          return;
+        }
+      }
+
+      if (!state.manualControl.enabled) return;
+
       if (code === 'Space') {
         event.preventDefault();
         manualEmergencyStop();
@@ -1100,6 +1245,10 @@
 
     window.addEventListener('keyup', (event) => {
       const code = event.code;
+      if (code === 'ArrowUp') state.cameraArrowKeys.up = false;
+      if (code === 'ArrowDown') state.cameraArrowKeys.down = false;
+      if (code === 'ArrowLeft') state.cameraArrowKeys.left = false;
+      if (code === 'ArrowRight') state.cameraArrowKeys.right = false;
       if (code === 'KeyW') state.manualKeys.w = false;
       if (code === 'KeyA') state.manualKeys.a = false;
       if (code === 'KeyS') state.manualKeys.s = false;
@@ -1118,6 +1267,24 @@
 
     document.getElementById('snapshotBtn').addEventListener('click', () => {
       send({ op: 'get_nav_snapshot' });
+    });
+    const ptzCommands = [
+      'angle_135',
+      'angle_90',
+      'angle_45',
+      'angle_180',
+      'angle_0',
+      'angle_m135',
+      'angle_m90',
+      'angle_m45',
+    ];
+    for (const command of ptzCommands) {
+      const btn = document.getElementById(`ptz_${command}`);
+      if (!btn) continue;
+      btn.addEventListener('click', () => send({ op: 'camera_pan', command }));
+    }
+    document.getElementById('ptz_center_zoom').addEventListener('click', () => {
+      send({ op: 'camera_zoom_toggle' });
     });
     document.getElementById('snapshotCloseBtn').addEventListener('click', () => {
       document.getElementById('snapshotModal').classList.remove('show');
@@ -1155,6 +1322,7 @@
     applyViewMode();
     updateManualSliderLabels();
     renderManualStatus();
+    updateCameraStatusUi(state.cameraStatus);
     renderZoneList({ zones: state.lastZones });
     updateResendGoalBtnState();
   </script>
