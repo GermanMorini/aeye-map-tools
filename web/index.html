@@ -8,20 +8,20 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
   <style>
     :root {
-      --bg: #0a0f1a;
-      --panel: #111827;
-      --line: #1f2937;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --accent: #22d3ee;
-      --good: #22c55e;
-      --bad: #ef4444;
+      --bg: #edf3f9;
+      --panel: #ffffff;
+      --line: #5d7590;
+      --text: #102235;
+      --muted: #2f4358;
+      --accent: #005ec4;
+      --good: #0f7a3c;
+      --bad: #b42318;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: radial-gradient(circle at 20% 0%, #1b2742, var(--bg));
+      background: linear-gradient(180deg, #f7fbff 0%, var(--bg) 45%, #dce8f4 100%);
       color: var(--text);
     }
     .layout {
@@ -31,25 +31,56 @@
       height: 100vh;
       padding: 12px;
     }
+    .layout > * { min-width: 0; }
     .panel {
-      background: linear-gradient(180deg, #0d1423, var(--panel));
+      background: linear-gradient(180deg, #ffffff, #f6fbff);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 12px;
       overflow: auto;
+    }
+    .visual-col {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+      height: calc(100vh - 24px);
+    }
+    .status-board {
+      background: linear-gradient(180deg, #ffffff, #f6fbff);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 12px;
+      align-content: start;
+    }
+    .status-board .status {
+      margin: 0;
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
     .panel h2 {
       margin: 0 0 8px 0;
       font-size: 16px;
       font-weight: 700;
     }
-    .row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+      width: 100%;
+    }
+    .row > * { min-width: 0; }
+    .row > *:only-child { grid-column: 1 / -1; }
     .stack { display: flex; flex-direction: column; gap: 8px; }
     input, button, select, textarea {
       font: inherit;
       border-radius: 8px;
-      border: 1px solid #2d3a51;
-      background: #030712;
+      border: 1px solid #4f6a84;
+      background: #ffffff;
       color: var(--text);
       padding: 8px 10px;
       width: 100%;
@@ -57,33 +88,39 @@
     textarea { min-height: 120px; }
     button {
       cursor: pointer;
-      background: linear-gradient(180deg, #67e8f9, var(--accent));
-      color: #03202b;
-      border: 0;
+      background: linear-gradient(180deg, #0b6ed5, var(--accent));
+      color: #ffffff;
+      border: 1px solid #00488f;
       font-weight: 700;
-      width: auto;
+      width: 100%;
+      min-width: 0;
+      white-space: normal;
     }
     button.secondary {
-      background: #334155;
+      background: #e6eef7;
       color: var(--text);
-      border: 1px solid #475569;
+      border: 1px solid #5d7590;
       font-weight: 600;
     }
     button.secondary.active {
-      background: #dc2626;
-      border-color: #991b1b;
-      color: #fecaca;
+      background: #b42318;
+      border-color: #7e150d;
+      color: #ffffff;
     }
     button.secondary.manual-on {
-      background: #166534;
-      border-color: #14532d;
-      color: #dcfce7;
+      background: #0f7a3c;
+      border-color: #0a582a;
+      color: #ffffff;
     }
     button.danger {
-      background: linear-gradient(180deg, #ef4444, #b91c1c);
-      color: #fef2f2;
-      border: 1px solid #7f1d1d;
+      background: linear-gradient(180deg, #d93629, #a82015);
+      color: #ffffff;
+      border: 1px solid #7e150d;
       font-weight: 700;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
     }
     .status { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
     .status.good { color: var(--good); }
@@ -91,10 +128,11 @@
     #viewStage {
       position: relative;
       width: 100%;
-      height: calc(100vh - 24px);
+      flex: 1 1 auto;
+      min-height: 0;
       border-radius: 12px;
       border: 1px solid var(--line);
-      background: #020617;
+      background: #dfeaf5;
       overflow: hidden;
     }
     .view-pane {
@@ -102,8 +140,8 @@
       inset: 0;
       overflow: hidden;
       border-radius: 10px;
-      border: 1px solid #334155;
-      background: #020617;
+      border: 1px solid #5d7590;
+      background: #f6fbff;
       transition: all 180ms ease;
     }
     #cameraPane {
@@ -119,7 +157,7 @@
     }
     #gpsPane {
       z-index: 1100;
-      box-shadow: 0 10px 28px rgba(2, 6, 23, 0.55);
+      box-shadow: 0 10px 24px rgba(17, 34, 52, 0.28);
     }
     #map {
       width: 100%;
@@ -166,9 +204,9 @@
       width: 600px;
       height: 388px;
       z-index: 1100;
-      border: 1px solid #334155;
+      border: 1px solid #5d7590;
       border-radius: 10px;
-      box-shadow: 0 10px 28px rgba(2, 6, 23, 0.55);
+      box-shadow: 0 10px 24px rgba(17, 34, 52, 0.28);
       opacity: 0.97;
     }
     .zone-list {
@@ -178,6 +216,7 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
+      background: #ffffff;
     }
     .zone-list li {
       padding: 8px;
@@ -190,8 +229,8 @@
     }
     .zone-list li:last-child { border-bottom: 0; }
     .badge { padding: 2px 6px; border-radius: 999px; font-size: 11px; }
-    .on { background: #14532d; color: #dcfce7; }
-    .off { background: #3f3f46; color: #e4e4e7; }
+    .on { background: #0f7a3c; color: #ffffff; }
+    .off { background: #5a6c7e; color: #ffffff; }
     .wp-icon {
       width: 30px;
       height: 30px;
@@ -216,9 +255,9 @@
       transform: translateX(-50%);
       font-size: 10px;
       font-weight: 700;
-      color: #f8fafc;
-      background: rgba(15, 23, 42, 0.95);
-      border: 1px solid #475569;
+      color: #0f2236;
+      background: rgba(255, 255, 255, 0.97);
+      border: 1px solid #5d7590;
       border-radius: 999px;
       padding: 0 5px;
       line-height: 14px;
@@ -238,19 +277,19 @@
       width: 100%;
       text-align: center;
       font-weight: 700;
-      background: #334155;
-      border: 1px solid #475569;
-      color: #e2e8f0;
+      background: #e6eef7;
+      border: 1px solid #5d7590;
+      color: #102235;
     }
     .ptz-grid button:hover {
-      background: #475569;
+      background: #d7e5f3;
     }
     pre {
       margin: 0;
       max-height: 200px;
       overflow: auto;
-      background: #020617;
-      border: 1px solid #1e293b;
+      background: #ffffff;
+      border: 1px solid #5d7590;
       border-radius: 8px;
       padding: 8px;
       font-size: 12px;
@@ -260,7 +299,7 @@
     .modal-backdrop {
       position: fixed;
       inset: 0;
-      background: rgba(2, 6, 23, 0.8);
+      background: rgba(16, 34, 53, 0.42);
       display: none;
       align-items: center;
       justify-content: center;
@@ -271,8 +310,8 @@
     .modal-card {
       width: min(920px, 96vw);
       max-height: 92vh;
-      background: linear-gradient(180deg, #0b1220, #111827);
-      border: 1px solid #334155;
+      background: linear-gradient(180deg, #ffffff, #f3f9ff);
+      border: 1px solid #5d7590;
       border-radius: 12px;
       padding: 12px;
       overflow: auto;
@@ -290,9 +329,9 @@
     }
     #snapshotImage {
       width: 100%;
-      border: 1px solid #334155;
+      border: 1px solid #5d7590;
       border-radius: 8px;
-      background: #0b1220;
+      background: #ffffff;
     }
     #snapshotMeta {
       font-size: 12px;
@@ -301,6 +340,7 @@
     }
     @media (max-width: 1080px) {
       .layout { grid-template-columns: 1fr; height: auto; }
+      .visual-col { height: auto; }
       #viewStage { height: 60vh; }
       #swapViewBtn {
         bottom: 10px;
@@ -330,7 +370,6 @@
           <button id="connectBtn">Connect</button>
           <button id="disconnectBtn" class="secondary">Disconnect</button>
         </div>
-        <div id="status" class="status">Disconnected</div>
       </div>
 
       <h2>Zones</h2>
@@ -355,8 +394,14 @@
         <div class="row">
           <button id="goalModeBtn" class="secondary">Waypoint Mode</button>
           <button id="sendGoalsBtn" class="secondary" disabled>Send Waypoints</button>
+          <button id="popGoalBtn" class="secondary" disabled>Undo Last</button>
           <button id="clearGoalsBtn" class="secondary" disabled>Clear Waypoints</button>
           <button id="cancelGoalBtn" class="secondary">Cancel Goal</button>
+        </div>
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+            <input id="goalLoop" type="checkbox" style="width:auto;" /> Loop route
+          </label>
         </div>
         <div class="row">
           <button id="manualModeBtn" class="secondary">Manual Control: OFF</button>
@@ -372,10 +417,6 @@
           </label>
           <input id="manualAngularSlider" type="range" min="0.1" max="0.4" step="0.01" value="0.40" />
         </div>
-        <div id="goalStatus" class="status">No active goal</div>
-        <div id="waypointStatus" class="status">Waypoints: 0</div>
-        <div id="cmdVelSafeStatus" class="status">cmd_vel_safe: n/a</div>
-        <div id="manualStatus" class="status">Manual: OFF · keys=- · vx_cmd=0.00 · wz_cmd=0.00</div>
       </div>
 
       <h2>Camera PTZ</h2>
@@ -393,19 +434,27 @@
           <button id="ptz_angle_m90" class="secondary" type="button">⇓</button>
           <button id="ptz_angle_m45" class="secondary" type="button">⇘</button>
         </div>
-        <div id="cameraStatus" class="status">camera: n/a</div>
       </div>
 
     </div>
-
-    <div id="viewStage" class="mode-camera-main">
-      <div id="cameraPane" class="view-pane">
-        <iframe id="cameraFrame" title="Camera feed" loading="lazy"></iframe>
+    <div class="visual-col">
+      <div class="status-board">
+        <div id="status" class="status">Disconnected</div>
+        <div id="goalStatus" class="status">No active goal</div>
+        <div id="waypointStatus" class="status">Waypoints: 0</div>
+        <div id="cmdVelSafeStatus" class="status">cmd_vel_safe: n/a</div>
+        <div id="manualStatus" class="status">Manual: OFF · keys=- · vx_cmd=0.00 · wz_cmd=0.00</div>
+        <div id="cameraStatus" class="status">camera: n/a</div>
       </div>
-      <div id="gpsPane" class="view-pane">
-        <div id="map"></div>
+      <div id="viewStage" class="mode-camera-main">
+        <div id="cameraPane" class="view-pane">
+          <iframe id="cameraFrame" title="Camera feed" loading="lazy"></iframe>
+        </div>
+        <div id="gpsPane" class="view-pane">
+          <div id="map"></div>
+        </div>
+        <button id="swapViewBtn" class="secondary" type="button">Ver GPS grande</button>
       </div>
-      <button id="swapViewBtn" class="secondary" type="button">Ver GPS grande</button>
     </div>
   </div>
 
@@ -516,11 +565,14 @@
 
     function buildWaypointIcon(index, yawDeg, draft = false) {
       const yaw = normalizeYawDeg(yawDeg);
+      // ROS yaw: 0 deg = +X (east), CCW positive.
+      // CSS rotate: clockwise positive, and icon base points north (up).
+      const cssRotationDeg = normalizeYawDeg(90.0 - yaw);
       const cls = draft ? 'wp-icon draft' : 'wp-icon';
       return L.divIcon({
         className: '',
         html:
-          `<div class="${cls}" style="transform: rotate(${yaw}deg);">` +
+          `<div class="${cls}" style="transform: rotate(${cssRotationDeg}deg);">` +
             '<div class="wp-arrow"></div>' +
             `<div class="wp-index">${Number(index) + 1}</div>` +
           '</div>',
@@ -563,6 +615,7 @@
     function updateGoalButtonsState() {
       const hasWaypoints = state.goalWaypoints.length > 0;
       document.getElementById('sendGoalsBtn').disabled = !hasWaypoints;
+      document.getElementById('popGoalBtn').disabled = !hasWaypoints;
       document.getElementById('clearGoalsBtn').disabled = !hasWaypoints;
     }
 
@@ -603,6 +656,17 @@
       updateWaypointStatus();
     }
 
+    function popLastWaypoint() {
+      if (state.goalWaypoints.length === 0) {
+        updateWaypointStatus('No waypoints to remove', false);
+        return;
+      }
+      state.goalWaypoints.pop();
+      renderGoalWaypoints();
+      updateGoalButtonsState();
+      updateWaypointStatus();
+    }
+
     function sendCurrentWaypoints() {
       if (state.manualControl.enabled) {
         setStatus('Disable manual control before sending waypoints', false);
@@ -617,7 +681,7 @@
         lon: Number(wp.lon),
         yaw_deg: Number(wp.yaw_deg || 0.0)
       }));
-      const loopEnabled = payloadWaypoints.length > 1;
+      const loopEnabled = Boolean(document.getElementById('goalLoop')?.checked);
       send({
         op: 'set_goal_ll',
         waypoints: payloadWaypoints,
@@ -1390,6 +1454,10 @@
       sendCurrentWaypoints();
     });
 
+    document.getElementById('popGoalBtn').addEventListener('click', () => {
+      popLastWaypoint();
+    });
+
     document.getElementById('clearGoalsBtn').addEventListener('click', () => {
       clearWaypoints();
       const goalStatusEl = document.getElementById('goalStatus');
@@ -1421,6 +1489,13 @@
       if (isTextInputFocused()) return;
 
       const code = event.code;
+      if (code === 'Escape' && state.goalMode) {
+        event.preventDefault();
+        cancelGoalDraft();
+        setGoalModeUi(false);
+        return;
+      }
+
       const cameraArrowByCode = {
         ArrowUp: 'up',
         ArrowDown: 'down',

@@ -741,7 +741,7 @@ class WebSocketApi:
                 return None, False, f"waypoint[{idx}] values must be finite"
             waypoints.append({"lat": lat, "lon": lon, "yaw_deg": yaw_deg})
 
-        return waypoints, (loop or (len(waypoints) > 1)), ""
+        return waypoints, loop, ""
 
     async def handle(self, ws: Any, path: Optional[str] = None) -> None:
         _ = path
