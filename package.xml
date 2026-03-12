@@ -9,7 +9,8 @@
 
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
-  <depend>navegacion_gps_interfaces</depend>
+  <depend>std_srvs</depend>
+  <depend>interfaces</depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-websockets</exec_depend>

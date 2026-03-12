@@ -741,15 +741,15 @@
       }
     }
 
-    function cameraCommandFromArrowSnapshot(keys) {
-      if (keys.up && keys.left) return 'angle_135';
-      if (keys.up && keys.right) return 'angle_45';
-      if (keys.down && keys.left) return 'angle_m135';
-      if (keys.down && keys.right) return 'angle_m45';
-      if (keys.up) return 'angle_90';
-      if (keys.down) return 'angle_m90';
-      if (keys.left) return 'angle_180';
-      if (keys.right) return 'angle_0';
+    function cameraAngleFromArrowSnapshot(keys) {
+      if (keys.up && keys.left) return 135;
+      if (keys.up && keys.right) return 45;
+      if (keys.down && keys.left) return -135;
+      if (keys.down && keys.right) return -45;
+      if (keys.up) return 90;
+      if (keys.down) return -90;
+      if (keys.left) return 180;
+      if (keys.right) return 0;
       return null;
     }
 
@@ -766,9 +766,9 @@
       };
       state.cameraArrowTimer = window.setTimeout(() => {
         state.cameraArrowTimer = null;
-        const command = cameraCommandFromArrowSnapshot(snapshot);
-        if (command) {
-          send({ op: 'camera_pan', command });
+        const angle = cameraAngleFromArrowSnapshot(snapshot);
+        if (Number.isFinite(angle)) {
+          send({ op: 'camera_pan', angle });
         }
       }, 90);
     }
@@ -1071,10 +1071,50 @@
       return zones;
     }
 
+    function closeGeoJsonRing(coords) {
+      if (!Array.isArray(coords) || coords.length < 3) return [];
+      const ring = coords.map((c) => [c[0], c[1]]);
+      const first = ring[0];
+      const last = ring[ring.length - 1];
+      if (!first || !last || first[0] !== last[0] || first[1] !== last[1]) {
+        ring.push([first[0], first[1]]);
+      }
+      return ring;
+    }
+
+    function buildGeoJsonFromLayers() {
+      const features = [];
+      drawnItems.eachLayer((layer) => {
+        const meta = layer.zoneMeta || { id: newZoneId(), type: 'no_go', enabled: true };
+        if (!meta.id) meta.id = newZoneId();
+        const latLngs = layer.getLatLngs()[0] || [];
+        const ring = closeGeoJsonRing(latLngs.map((ll) => [ll.lng, ll.lat]));
+        if (ring.length >= 4) {
+          features.push({
+            type: 'Feature',
+            properties: {
+              id: meta.id,
+              type: meta.type || 'no_go',
+              enabled: meta.enabled !== false
+            },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [ring]
+            }
+          });
+        }
+      });
+      return {
+        type: 'FeatureCollection',
+        features
+      };
+    }
+
     function pushLayersToServer() {
       const zones = collectZonesFromLayers();
+      const geojson = buildGeoJsonFromLayers();
       renderZoneList({ zones });
-      send({ op: 'set_zones_ll', zones });
+      send({ op: 'set_zones_geojson', geojson });
     }
 
     map.on(L.Draw.Event.CREATED, (e) => {
@@ -1268,20 +1308,20 @@
     document.getElementById('snapshotBtn').addEventListener('click', () => {
       send({ op: 'get_nav_snapshot' });
     });
-    const ptzCommands = [
-      'angle_135',
-      'angle_90',
-      'angle_45',
-      'angle_180',
-      'angle_0',
-      'angle_m135',
-      'angle_m90',
-      'angle_m45',
+    const ptzAngles = [
+      { id: 'ptz_angle_135', angle: 135 },
+      { id: 'ptz_angle_90', angle: 90 },
+      { id: 'ptz_angle_45', angle: 45 },
+      { id: 'ptz_angle_180', angle: 180 },
+      { id: 'ptz_angle_0', angle: 0 },
+      { id: 'ptz_angle_m135', angle: -135 },
+      { id: 'ptz_angle_m90', angle: -90 },
+      { id: 'ptz_angle_m45', angle: -45 },
     ];
-    for (const command of ptzCommands) {
-      const btn = document.getElementById(`ptz_${command}`);
+    for (const item of ptzAngles) {
+      const btn = document.getElementById(item.id);
       if (!btn) continue;
-      btn.addEventListener('click', () => send({ op: 'camera_pan', command }));
+      btn.addEventListener('click', () => send({ op: 'camera_pan', angle: item.angle }));
     }
     document.getElementById('ptz_center_zoom').addEventListener('click', () => {
       send({ op: 'camera_zoom_toggle' });

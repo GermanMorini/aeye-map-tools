@@ -10,8 +10,9 @@ def generate_launch_description():
     gps_topic = LaunchConfiguration("gps_topic")
     map_frame = LaunchConfiguration("map_frame")
 
-    keepout_set_zones_service = LaunchConfiguration("keepout_set_zones_service")
-    keepout_get_state_service = LaunchConfiguration("keepout_get_state_service")
+    zones_set_geojson_service = LaunchConfiguration("zones_set_geojson_service")
+    zones_get_state_service = LaunchConfiguration("zones_get_state_service")
+    zones_reload_service = LaunchConfiguration("zones_reload_service")
 
     nav_set_goal_service = LaunchConfiguration("nav_set_goal_service")
     nav_cancel_goal_service = LaunchConfiguration("nav_cancel_goal_service")
@@ -37,10 +38,13 @@ def generate_launch_description():
             DeclareLaunchArgument("gps_topic", default_value="/gps/fix"),
             DeclareLaunchArgument("map_frame", default_value="map"),
             DeclareLaunchArgument(
-                "keepout_set_zones_service", default_value="/keepout_manager/set_zones"
+                "zones_set_geojson_service", default_value="/zones_manager/set_geojson"
             ),
             DeclareLaunchArgument(
-                "keepout_get_state_service", default_value="/keepout_manager/get_state"
+                "zones_get_state_service", default_value="/zones_manager/get_state"
+            ),
+            DeclareLaunchArgument(
+                "zones_reload_service", default_value="/zones_manager/reload_from_disk"
             ),
             DeclareLaunchArgument(
                 "nav_set_goal_service", default_value="/nav_command_server/set_goal_ll"
@@ -93,8 +97,9 @@ def generate_launch_description():
                         "ws_port": ws_port,
                         "gps_topic": gps_topic,
                         "map_frame": map_frame,
-                        "keepout_set_zones_service": keepout_set_zones_service,
-                        "keepout_get_state_service": keepout_get_state_service,
+                        "zones_set_geojson_service": zones_set_geojson_service,
+                        "zones_get_state_service": zones_get_state_service,
+                        "zones_reload_service": zones_reload_service,
                         "nav_set_goal_service": nav_set_goal_service,
                         "nav_cancel_goal_service": nav_cancel_goal_service,
                         "nav_brake_service": nav_brake_service,

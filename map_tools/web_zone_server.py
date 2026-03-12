@@ -14,18 +14,18 @@ from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix
 from std_srvs.srv import Trigger
 
-from navegacion_gps_interfaces.msg import NavTelemetry, NoGoPoint, NoGoZone
-from navegacion_gps_interfaces.srv import (
+from interfaces.msg import NavTelemetry
+from interfaces.srv import (
     BrakeNav,
     CameraPan,
     CameraStatus,
     CancelNavGoal,
-    GetKeepoutState,
     GetNavSnapshot,
     GetNavState,
-    SetKeepoutZones,
+    GetZonesState,
     SetManualMode,
     SetNavGoalLL,
+    SetZonesGeoJson,
 )
 
 
@@ -44,9 +44,9 @@ class WebZoneServerNode(Node):
         self.declare_parameter("set_zones_timeout_s", 12.0)
         self.declare_parameter("set_goal_timeout_s", 12.0)
 
-        self.declare_parameter("keepout_set_zones_service", "/keepout_manager/set_zones")
-        self.declare_parameter("keepout_get_state_service", "/keepout_manager/get_state")
-        self.declare_parameter("keepout_reload_zones_service", "/keepout_manager/reload_zones")
+        self.declare_parameter("zones_set_geojson_service", "/zones_manager/set_geojson")
+        self.declare_parameter("zones_get_state_service", "/zones_manager/get_state")
+        self.declare_parameter("zones_reload_service", "/zones_manager/reload_from_disk")
 
         self.declare_parameter("nav_set_goal_service", "/nav_command_server/set_goal_ll")
         self.declare_parameter("nav_cancel_goal_service", "/nav_command_server/cancel_goal")
@@ -58,6 +58,7 @@ class WebZoneServerNode(Node):
         self.declare_parameter("nav_snapshot_service", "/nav_snapshot_server/get_nav_snapshot")
         self.declare_parameter("nav_telemetry_topic", "/nav_command_server/telemetry")
         self.declare_parameter("camera_pan_service", "/camara/camera_pan")
+        self.declare_parameter("camera_zoom_toggle_service", "/camara/camera_zoom_toggle")
         self.declare_parameter("camera_status_service", "/camara/camera_status")
 
         self.ws_host = str(self.get_parameter("ws_host").value)
@@ -76,15 +77,13 @@ class WebZoneServerNode(Node):
             self.request_timeout_s, float(self.get_parameter("set_goal_timeout_s").value)
         )
 
-        self.keepout_set_zones_service = str(
-            self.get_parameter("keepout_set_zones_service").value
+        self.zones_set_geojson_service = str(
+            self.get_parameter("zones_set_geojson_service").value
         )
-        self.keepout_get_state_service = str(
-            self.get_parameter("keepout_get_state_service").value
+        self.zones_get_state_service = str(
+            self.get_parameter("zones_get_state_service").value
         )
-        self.keepout_reload_zones_service = str(
-            self.get_parameter("keepout_reload_zones_service").value
-        )
+        self.zones_reload_service = str(self.get_parameter("zones_reload_service").value)
 
         self.nav_set_goal_service = str(self.get_parameter("nav_set_goal_service").value)
         self.nav_cancel_goal_service = str(
@@ -100,6 +99,9 @@ class WebZoneServerNode(Node):
         self.nav_snapshot_service = str(self.get_parameter("nav_snapshot_service").value)
         self.nav_telemetry_topic = str(self.get_parameter("nav_telemetry_topic").value)
         self.camera_pan_service = str(self.get_parameter("camera_pan_service").value)
+        self.camera_zoom_toggle_service = str(
+            self.get_parameter("camera_zoom_toggle_service").value
+        )
         self.camera_status_service = str(self.get_parameter("camera_status_service").value)
 
         self._lock = threading.Lock()
@@ -109,6 +111,7 @@ class WebZoneServerNode(Node):
         self._last_gps_broadcast_monotonic: Optional[float] = None
 
         self._zones: List[Dict[str, Any]] = []
+        self._zones_geojson: Dict[str, Any] = {"type": "FeatureCollection", "features": []}
         self._mask_ready = False
         self._mask_source = "none"
 
@@ -140,15 +143,13 @@ class WebZoneServerNode(Node):
             NavTelemetry, self.nav_telemetry_topic, self._on_nav_telemetry, 10
         )
 
-        self._keepout_set_zones_client = self.create_client(
-            SetKeepoutZones, self.keepout_set_zones_service
+        self._zones_set_geojson_client = self.create_client(
+            SetZonesGeoJson, self.zones_set_geojson_service
         )
-        self._keepout_get_state_client = self.create_client(
-            GetKeepoutState, self.keepout_get_state_service
+        self._zones_get_state_client = self.create_client(
+            GetZonesState, self.zones_get_state_service
         )
-        self._keepout_reload_zones_client = self.create_client(
-            Trigger, self.keepout_reload_zones_service
-        )
+        self._zones_reload_client = self.create_client(Trigger, self.zones_reload_service)
         self._nav_set_goal_client = self.create_client(SetNavGoalLL, self.nav_set_goal_service)
         self._nav_cancel_goal_client = self.create_client(
             CancelNavGoal, self.nav_cancel_goal_service
@@ -161,14 +162,18 @@ class WebZoneServerNode(Node):
         self._nav_get_state_client = self.create_client(GetNavState, self.nav_get_state_service)
         self._nav_snapshot_client = self.create_client(GetNavSnapshot, self.nav_snapshot_service)
         self._camera_pan_client = self.create_client(CameraPan, self.camera_pan_service)
+        self._camera_zoom_toggle_client = self.create_client(
+            Trigger, self.camera_zoom_toggle_service
+        )
         self._camera_status_client = self.create_client(
             CameraStatus, self.camera_status_service
         )
         self.get_logger().info(
             "Web gateway ready "
-            f"(ws={self.ws_host}:{self.ws_port}, keepout_set={self.keepout_set_zones_service}, "
+            f"(ws={self.ws_host}:{self.ws_port}, zones_set={self.zones_set_geojson_service}, "
             f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service}, "
-            f"camera_pan={self.camera_pan_service}, camera_status={self.camera_status_service}, "
+            f"camera_pan={self.camera_pan_service}, camera_zoom_toggle={self.camera_zoom_toggle_service}, "
+            f"camera_status={self.camera_status_service}, "
             f"teleop_topic={self.teleop_cmd_topic})"
         )
 
@@ -191,6 +196,7 @@ class WebZoneServerNode(Node):
                 "ok": True,
                 "frame_id": self.map_frame,
                 "zones": list(self._zones),
+                "geojson": dict(self._zones_geojson),
                 "mask_ready": bool(self._mask_ready),
                 "mask_source": str(self._mask_source),
                 "robot_pose": self._last_robot_pose,
@@ -303,42 +309,115 @@ class WebZoneServerNode(Node):
             )
         return result
 
-    def _zone_dict_to_msg(self, zone: Dict[str, Any]) -> NoGoZone:
-        out = NoGoZone()
-        out.id = str(zone.get("id", ""))
-        out.type = str(zone.get("type", "no_go"))
-        out.enabled = bool(zone.get("enabled", True))
+    def _geojson_string_to_zones(self, geojson_text: str) -> List[Dict[str, Any]]:
+        try:
+            payload = json.loads(geojson_text)
+        except Exception:
+            return []
+        if not isinstance(payload, dict):
+            return []
+        if str(payload.get("type", "")) != "FeatureCollection":
+            return []
+        features = payload.get("features")
+        if not isinstance(features, list):
+            return []
 
-        points: List[NoGoPoint] = []
-        polygon = zone.get("polygon", [])
-        if isinstance(polygon, list):
-            for v in polygon:
-                try:
-                    lat = float(v["lat"])
-                    lon = float(v["lon"])
-                except Exception:
+        zones: List[Dict[str, Any]] = []
+        for feature_idx, feature in enumerate(features):
+            if not isinstance(feature, dict):
+                continue
+            props = feature.get("properties")
+            if not isinstance(props, dict):
+                props = {}
+
+            zone_id = str(props.get("id", f"zone_{feature_idx + 1}"))
+            zone_type = str(props.get("type", "no_go"))
+            enabled = bool(props.get("enabled", True))
+
+            geometry = feature.get("geometry")
+            if not isinstance(geometry, dict):
+                continue
+            geometry_type = str(geometry.get("type", ""))
+            coordinates = geometry.get("coordinates", [])
+            polygons: List[Any] = []
+            if geometry_type == "Polygon":
+                polygons = [coordinates]
+            elif geometry_type == "MultiPolygon" and isinstance(coordinates, list):
+                polygons = coordinates
+            else:
+                continue
+
+            for poly_idx, polygon in enumerate(polygons):
+                if not isinstance(polygon, list) or len(polygon) == 0:
                     continue
-                p = NoGoPoint()
-                p.lat = lat
-                p.lon = lon
-                points.append(p)
-        out.polygon = points
-        return out
+                outer = polygon[0]
+                if not isinstance(outer, list):
+                    continue
+                points: List[Dict[str, float]] = []
+                for coord in outer:
+                    if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+                        continue
+                    try:
+                        lon = float(coord[0])
+                        lat = float(coord[1])
+                    except Exception:
+                        continue
+                    points.append({"lat": lat, "lon": lon})
+                if len(points) < 3:
+                    continue
+                if points[0] == points[-1]:
+                    points = points[:-1]
+                if len(points) < 3:
+                    continue
 
-    def _zone_msg_to_dict(self, zone_msg: NoGoZone) -> Dict[str, Any]:
-        polygon = []
-        for p in zone_msg.polygon:
-            polygon.append({"lat": float(p.lat), "lon": float(p.lon)})
-        return {
-            "id": str(zone_msg.id),
-            "type": str(zone_msg.type),
-            "enabled": bool(zone_msg.enabled),
-            "polygon": polygon,
-        }
+                polygon_id = zone_id if len(polygons) == 1 else f"{zone_id}__{poly_idx + 1}"
+                zones.append(
+                    {
+                        "id": polygon_id,
+                        "type": zone_type,
+                        "enabled": enabled,
+                        "polygon": points,
+                    }
+                )
+        return zones
 
-    def _update_keepout_state(self, response: GetKeepoutState.Response) -> None:
+    def _normalize_geojson_payload(
+        self, payload: Any
+    ) -> Tuple[Optional[str], Optional[Dict[str, Any]], str]:
+        try:
+            if isinstance(payload, str):
+                obj = json.loads(payload)
+            elif isinstance(payload, dict):
+                obj = payload
+            else:
+                return None, None, "geojson must be an object or string"
+        except Exception as exc:
+            return None, None, f"invalid geojson json: {exc}"
+        if not isinstance(obj, dict):
+            return None, None, "geojson root must be an object"
+        if str(obj.get("type", "")) != "FeatureCollection":
+            return None, None, "geojson root type must be FeatureCollection"
+        features = obj.get("features")
+        if not isinstance(features, list):
+            return None, None, "geojson.features must be a list"
+        return json.dumps(obj, ensure_ascii=True), obj, ""
+
+    def _update_zones_state(self, response: GetZonesState.Response) -> None:
+        geojson_text = str(response.geojson)
+        zones_geojson: Dict[str, Any]
+        try:
+            parsed = json.loads(geojson_text) if geojson_text else {}
+            zones_geojson = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            zones_geojson = {}
+
         with self._lock:
-            self._zones = [self._zone_msg_to_dict(z) for z in response.zones]
+            self._zones = self._geojson_string_to_zones(geojson_text)
+            self._zones_geojson = (
+                zones_geojson
+                if zones_geojson
+                else {"type": "FeatureCollection", "features": []}
+            )
             self._mask_ready = bool(response.mask_ready)
             self._mask_source = str(response.mask_source)
             if response.frame_id:
@@ -364,43 +443,50 @@ class WebZoneServerNode(Node):
                     "lon": float(response.robot_lon),
                 }
 
-    def get_keepout_state(self) -> Tuple[bool, str]:
-        req = GetKeepoutState.Request()
-        res = self._call_service(self._keepout_get_state_client, req, self.request_timeout_s)
+    def get_zones_state(self) -> Tuple[bool, str]:
+        req = GetZonesState.Request()
+        res = self._call_service(self._zones_get_state_client, req, self.request_timeout_s)
         if res is None:
-            return False, "keepout get_state timeout"
+            return False, "zones get_state timeout"
         if not res.ok:
             return False, str(res.error)
-        self._update_keepout_state(res)
+        self._update_zones_state(res)
         return True, ""
 
-    def set_keepout_zones(self, zones: List[Dict[str, Any]]) -> Tuple[bool, str, bool]:
-        self.get_logger().info(f"WS->ROS set_keepout_zones (zones={len(zones)})")
-        req = SetKeepoutZones.Request()
-        req.zones = [self._zone_dict_to_msg(z) for z in zones]
-        res = self._call_service(self._keepout_set_zones_client, req, self.set_zones_timeout_s)
+    def set_zones_geojson(self, payload: Any) -> Tuple[bool, str, bool]:
+        geojson_text, _, err = self._normalize_geojson_payload(payload)
+        if geojson_text is None:
+            return False, err, False
+        self.get_logger().info("WS->ROS set_zones_geojson")
+        req = SetZonesGeoJson.Request()
+        req.geojson = geojson_text
+        res = self._call_service(self._zones_set_geojson_client, req, self.set_zones_timeout_s)
         if res is None:
-            return False, "keepout set_zones timeout", False
+            return False, "zones set_geojson timeout", False
         if not res.ok:
-            self.get_logger().warning(f"set_keepout_zones failed: {res.error}")
-            return False, str(res.error), bool(res.published)
-        self.get_keepout_state()
-        self.get_logger().info(f"set_keepout_zones ok (published={bool(res.published)})")
-        return True, "", bool(res.published)
+            self.get_logger().warning(f"set_zones_geojson failed: {res.error}")
+            return False, str(res.error), bool(res.map_reloaded)
+        self.get_zones_state()
+        self.get_logger().info(
+            "set_zones_geojson ok "
+            f"(features={int(res.feature_count)}, polygons={int(res.polygon_count)}, "
+            f"map_reloaded={bool(res.map_reloaded)})"
+        )
+        return True, "", bool(res.map_reloaded)
 
-    def reload_keepout_zones(self) -> Tuple[bool, str]:
-        self.get_logger().info("WS->ROS reload_keepout_zones")
+    def reload_zones_from_disk(self) -> Tuple[bool, str]:
+        self.get_logger().info("WS->ROS reload_zones_from_disk")
         req = Trigger.Request()
         res = self._call_service(
-            self._keepout_reload_zones_client,
+            self._zones_reload_client,
             req,
             self.set_zones_timeout_s,
         )
         if res is None:
-            return False, "keepout reload_zones timeout"
+            return False, "zones reload timeout"
         if not res.success:
             return False, str(res.message or "reload failed")
-        ok_state, err_state = self.get_keepout_state()
+        ok_state, err_state = self.get_zones_state()
         if not ok_state:
             return False, err_state
         return True, ""
@@ -522,25 +608,44 @@ class WebZoneServerNode(Node):
         )
         return True, "", payload
 
-    def camera_pan(self, command: str) -> Tuple[bool, str, str]:
+    def camera_pan(self, angle_deg: float) -> Tuple[bool, str, float]:
         req = CameraPan.Request()
-        req.command = str(command)
+        req.angle_deg = float(angle_deg)
         res = self._call_service(self._camera_pan_client, req, self.request_timeout_s)
         if res is None:
-            return False, "camera_pan timeout", ""
+            return False, "camera_pan timeout", 0.0
 
-        applied = str(res.applied_command)
+        applied = float(res.applied_angle_deg)
         if res.ok:
             with self._lock:
                 self._camera_status["ok"] = True
                 self._camera_status["error"] = ""
-                if applied:
-                    self._camera_status["last_command"] = applied
+                self._camera_status["last_command"] = f"angle:{applied:.1f}"
         else:
             with self._lock:
                 self._camera_status["ok"] = False
                 self._camera_status["error"] = str(res.error)
         return bool(res.ok), str(res.error), applied
+
+    def camera_zoom_toggle(self) -> Tuple[bool, str]:
+        req = Trigger.Request()
+        res = self._call_service(
+            self._camera_zoom_toggle_client,
+            req,
+            self.request_timeout_s,
+        )
+        if res is None:
+            return False, "camera_zoom_toggle timeout"
+        if res.success:
+            with self._lock:
+                self._camera_status["ok"] = True
+                self._camera_status["error"] = ""
+                self._camera_status["last_command"] = "zoom_toggle"
+        else:
+            with self._lock:
+                self._camera_status["ok"] = False
+                self._camera_status["error"] = str(res.message)
+        return bool(res.success), str(res.message)
 
     def get_camera_status(self) -> Tuple[bool, str, Dict[str, Any]]:
         req = CameraStatus.Request()
@@ -573,9 +678,9 @@ class WebZoneServerNode(Node):
 
     def bootstrap_backend_state(self) -> None:
         self.get_logger().info("Bootstrapping gateway state from backend services...")
-        ok_k, err_k = self.get_keepout_state()
+        ok_k, err_k = self.get_zones_state()
         if not ok_k and err_k:
-            self.get_logger().warning(f"keepout bootstrap failed: {err_k}")
+            self.get_logger().warning(f"zones bootstrap failed: {err_k}")
         ok_n, err_n = self.get_nav_state()
         if not ok_n and err_n:
             self.get_logger().warning(f"nav bootstrap failed: {err_n}")
@@ -623,30 +728,30 @@ class WebSocketApi:
             await ws.send(json.dumps(self.node.snapshot_state()))
             return
 
-        if op == "set_zones_ll":
-            zones = msg.get("zones", [])
-            if not isinstance(zones, list):
+        if op == "set_zones_geojson":
+            geojson_payload = msg.get("geojson")
+            if geojson_payload is None:
                 await ws.send(
                     json.dumps(
                         {
                             "op": "ack",
                             "ok": False,
-                            "request": "set_zones_ll",
-                            "error": "zones must be a list",
+                            "request": "set_zones_geojson",
+                            "error": "geojson field is required",
                             "published": False,
                         }
                     )
                 )
                 return
             ok, err, published = await asyncio.to_thread(
-                self.node.set_keepout_zones, zones
+                self.node.set_zones_geojson, geojson_payload
             )
             await ws.send(
                 json.dumps(
                     {
                         "op": "ack",
                         "ok": ok,
-                        "request": "set_zones_ll",
+                        "request": "set_zones_geojson",
                         "error": None if ok else err,
                         "published": bool(published),
                     }
@@ -657,7 +762,7 @@ class WebSocketApi:
             return
 
         if op == "load_zones_file":
-            ok, err = await asyncio.to_thread(self.node.reload_keepout_zones)
+            ok, err = await asyncio.to_thread(self.node.reload_zones_from_disk)
             await ws.send(
                 json.dumps(
                     {
@@ -814,20 +919,34 @@ class WebSocketApi:
             return
 
         if op == "camera_pan":
-            command = str(msg.get("command", "")).strip()
-            if not command:
+            angle_raw = msg.get("angle")
+            try:
+                angle = float(angle_raw)
+            except (ValueError, TypeError):
                 await ws.send(
                     json.dumps(
                         {
                             "op": "ack",
                             "ok": False,
                             "request": "camera_pan",
-                            "error": "command is required",
+                            "error": "angle must be numeric",
                         }
                     )
                 )
                 return
-            ok, err, _ = await asyncio.to_thread(self.node.camera_pan, command)
+            if not np.isfinite(angle):
+                await ws.send(
+                    json.dumps(
+                        {
+                            "op": "ack",
+                            "ok": False,
+                            "request": "camera_pan",
+                            "error": "angle must be finite",
+                        }
+                    )
+                )
+                return
+            ok, err, _ = await asyncio.to_thread(self.node.camera_pan, angle)
             await ws.send(
                 json.dumps(
                     {
@@ -841,7 +960,7 @@ class WebSocketApi:
             return
 
         if op == "camera_zoom_toggle":
-            ok, err, _ = await asyncio.to_thread(self.node.camera_pan, "zoom_toggle")
+            ok, err = await asyncio.to_thread(self.node.camera_zoom_toggle)
             await ws.send(
                 json.dumps(
                     {
