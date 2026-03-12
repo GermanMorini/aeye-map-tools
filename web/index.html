@@ -192,6 +192,43 @@
     .badge { padding: 2px 6px; border-radius: 999px; font-size: 11px; }
     .on { background: #14532d; color: #dcfce7; }
     .off { background: #3f3f46; color: #e4e4e7; }
+    .wp-icon {
+      width: 30px;
+      height: 30px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: 50% 50%;
+    }
+    .wp-icon .wp-arrow {
+      width: 0;
+      height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-bottom: 15px solid #ef4444;
+      filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.7));
+    }
+    .wp-icon .wp-index {
+      position: absolute;
+      bottom: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 10px;
+      font-weight: 700;
+      color: #f8fafc;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid #475569;
+      border-radius: 999px;
+      padding: 0 5px;
+      line-height: 14px;
+      min-width: 16px;
+      text-align: center;
+    }
+    .wp-icon.draft .wp-arrow {
+      border-bottom-color: #f59e0b;
+      opacity: 0.9;
+    }
     .ptz-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -316,8 +353,9 @@
       <h2>Navigation</h2>
       <div class="stack">
         <div class="row">
-          <button id="goalModeBtn" class="secondary">Set Goal</button>
-          <button id="resendGoalBtn" class="secondary" disabled>Resend Last Goal</button>
+          <button id="goalModeBtn" class="secondary">Waypoint Mode</button>
+          <button id="sendGoalsBtn" class="secondary" disabled>Send Waypoints</button>
+          <button id="clearGoalsBtn" class="secondary" disabled>Clear Waypoints</button>
           <button id="cancelGoalBtn" class="secondary">Cancel Goal</button>
         </div>
         <div class="row">
@@ -335,6 +373,7 @@
           <input id="manualAngularSlider" type="range" min="0.1" max="0.4" step="0.01" value="0.40" />
         </div>
         <div id="goalStatus" class="status">No active goal</div>
+        <div id="waypointStatus" class="status">Waypoints: 0</div>
         <div id="cmdVelSafeStatus" class="status">cmd_vel_safe: n/a</div>
         <div id="manualStatus" class="status">Manual: OFF · keys=- · vx_cmd=0.00 · wz_cmd=0.00</div>
       </div>
@@ -422,6 +461,8 @@
       }
     });
     map.addControl(drawControl);
+    const goalLayer = L.layerGroup();
+    map.addLayer(goalLayer);
 
     const state = {
       ws: null,
@@ -432,8 +473,8 @@
       robotMarker: null,
       primaryView: 'camera',
       goalMode: false,
-      goalMarker: null,
-      lastGoal: null,
+      goalWaypoints: [],
+      goalDraft: null,
       lastSnapshot: null,
       cmdVelSafe: null,
       cameraStatus: { ok: false, error: 'camera status unavailable', last_command: 'none', zoom_in: false },
@@ -447,13 +488,6 @@
 
     const MANUAL_LOOP_HZ = 20.0;
 
-    const goalIcon = L.divIcon({
-      className: '',
-      html: '<div style="width:14px;height:14px;background:#ef4444;border:2px solid #fff;border-radius:50%;"></div>',
-      iconSize: [14, 14],
-      iconAnchor: [7, 7]
-    });
-
     function setStatus(text, ok = null) {
       const s = document.getElementById('status');
       s.textContent = text;
@@ -466,23 +500,174 @@
       return state.primaryView === 'gps';
     }
 
+    function normalizeYawDeg(yawDeg) {
+      let yaw = Number(yawDeg || 0.0);
+      while (yaw <= -180.0) yaw += 360.0;
+      while (yaw > 180.0) yaw -= 360.0;
+      return yaw;
+    }
+
+    function yawDegFromLatLng(origin, target) {
+      const dx = Number(target.lng) - Number(origin.lng);
+      const dy = Number(target.lat) - Number(origin.lat);
+      const yawDeg = Math.atan2(dy, dx) * 180.0 / Math.PI;
+      return normalizeYawDeg(yawDeg);
+    }
+
+    function buildWaypointIcon(index, yawDeg, draft = false) {
+      const yaw = normalizeYawDeg(yawDeg);
+      const cls = draft ? 'wp-icon draft' : 'wp-icon';
+      return L.divIcon({
+        className: '',
+        html:
+          `<div class="${cls}" style="transform: rotate(${yaw}deg);">` +
+            '<div class="wp-arrow"></div>' +
+            `<div class="wp-index">${Number(index) + 1}</div>` +
+          '</div>',
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      });
+    }
+
+    function updateWaypointStatus(text = null, ok = null) {
+      const statusEl = document.getElementById('waypointStatus');
+      if (typeof text === 'string') {
+        statusEl.textContent = text;
+      } else {
+        statusEl.textContent = `Waypoints: ${state.goalWaypoints.length}`;
+      }
+      statusEl.className = 'status';
+      if (ok === true) statusEl.classList.add('good');
+      if (ok === false) statusEl.classList.add('bad');
+    }
+
+    function renderGoalWaypoints() {
+      goalLayer.clearLayers();
+      state.goalWaypoints.forEach((wp, idx) => {
+        const marker = L.marker([wp.lat, wp.lon], {
+          icon: buildWaypointIcon(idx, wp.yaw_deg, false),
+          interactive: false
+        });
+        goalLayer.addLayer(marker);
+      });
+      if (state.goalDraft) {
+        const draft = state.goalDraft;
+        const marker = L.marker([draft.lat, draft.lon], {
+          icon: buildWaypointIcon(state.goalWaypoints.length, draft.yaw_deg, true),
+          interactive: false
+        });
+        goalLayer.addLayer(marker);
+      }
+    }
+
+    function updateGoalButtonsState() {
+      const hasWaypoints = state.goalWaypoints.length > 0;
+      document.getElementById('sendGoalsBtn').disabled = !hasWaypoints;
+      document.getElementById('clearGoalsBtn').disabled = !hasWaypoints;
+    }
+
     function setGoalModeUi(enabled) {
       state.goalMode = enabled === true;
       const btn = document.getElementById('goalModeBtn');
       if (state.goalMode) {
-        btn.textContent = 'Set Goal - ACTIVE';
+        btn.textContent = 'Waypoint Mode - ACTIVE';
         btn.classList.add('active');
         map.getContainer().style.cursor = 'crosshair';
+        updateWaypointStatus(
+          'Waypoint mode activo: click+arrastre para fijar yaw de cada waypoint',
+          true
+        );
       } else {
-        btn.textContent = 'Set Goal';
+        btn.textContent = 'Waypoint Mode';
         btn.classList.remove('active');
         map.getContainer().style.cursor = '';
       }
     }
 
-    function updateResendGoalBtnState() {
-      const btn = document.getElementById('resendGoalBtn');
-      btn.disabled = !(state.lastGoal && Number.isFinite(state.lastGoal.lat) && Number.isFinite(state.lastGoal.lon));
+    function addWaypoint(lat, lon, yawDeg) {
+      state.goalWaypoints.push({
+        lat: Number(lat),
+        lon: Number(lon),
+        yaw_deg: normalizeYawDeg(yawDeg)
+      });
+      renderGoalWaypoints();
+      updateGoalButtonsState();
+      updateWaypointStatus();
+    }
+
+    function clearWaypoints() {
+      state.goalWaypoints = [];
+      state.goalDraft = null;
+      renderGoalWaypoints();
+      updateGoalButtonsState();
+      updateWaypointStatus();
+    }
+
+    function sendCurrentWaypoints() {
+      if (state.manualControl.enabled) {
+        setStatus('Disable manual control before sending waypoints', false);
+        return;
+      }
+      if (state.goalWaypoints.length === 0) {
+        updateWaypointStatus('Add at least one waypoint before sending', false);
+        return;
+      }
+      const payloadWaypoints = state.goalWaypoints.map((wp) => ({
+        lat: Number(wp.lat),
+        lon: Number(wp.lon),
+        yaw_deg: Number(wp.yaw_deg || 0.0)
+      }));
+      const loopEnabled = payloadWaypoints.length > 1;
+      send({
+        op: 'set_goal_ll',
+        waypoints: payloadWaypoints,
+        loop: loopEnabled
+      });
+    }
+
+    function startGoalDraft(latlng) {
+      state.goalDraft = {
+        lat: Number(latlng.lat),
+        lon: Number(latlng.lng),
+        yaw_deg: 0.0,
+        dragYaw: false
+      };
+      if (map.dragging.enabled()) {
+        map.dragging.disable();
+      }
+      renderGoalWaypoints();
+    }
+
+    function updateGoalDraft(latlng) {
+      if (!state.goalDraft) return;
+      const origin = L.latLng(state.goalDraft.lat, state.goalDraft.lon);
+      const distanceM = map.distance(origin, latlng);
+      const dragYaw = distanceM > 0.35;
+      state.goalDraft.dragYaw = dragYaw;
+      if (dragYaw) {
+        state.goalDraft.yaw_deg = yawDegFromLatLng(origin, latlng);
+      }
+      renderGoalWaypoints();
+    }
+
+    function finishGoalDraft() {
+      if (!state.goalDraft) return;
+      const draft = state.goalDraft;
+      addWaypoint(draft.lat, draft.lon, draft.yaw_deg);
+      state.goalDraft = null;
+      renderGoalWaypoints();
+      if (!map.dragging.enabled()) {
+        map.dragging.enable();
+      }
+    }
+
+    function cancelGoalDraft() {
+      if (!state.goalDraft) return;
+      state.goalDraft = null;
+      renderGoalWaypoints();
+      if (!map.dragging.enabled()) {
+        map.dragging.enable();
+      }
     }
 
     function applyViewMode() {
@@ -495,9 +680,10 @@
       swapBtn.textContent = gpsMain ? 'Ver cámara grande' : 'Ver GPS grande';
 
       if (!gpsMain && state.goalMode) {
+        cancelGoalDraft();
         setGoalModeUi(false);
         const goalStatusEl = document.getElementById('goalStatus');
-        goalStatusEl.textContent = 'GPS en minimapa: intercambiá a GPS grande para editar o fijar goal';
+        goalStatusEl.textContent = 'GPS en minimapa: intercambiá a GPS grande para editar waypoints';
         goalStatusEl.className = 'status';
       }
 
@@ -892,7 +1078,15 @@
         const goalStatusEl = document.getElementById('goalStatus');
         if (msg.request === 'set_goal_ll') {
           if (msg.ok) {
-            goalStatusEl.textContent = 'Goal sent — navigating...';
+            const count = Number(msg.waypoint_count || state.goalWaypoints.length || 1);
+            const loopUsed = msg.loop === true;
+            if (count > 1 && loopUsed) {
+              goalStatusEl.textContent = `Route sent (${count} waypoints) — looping navigation active`;
+            } else if (count > 1) {
+              goalStatusEl.textContent = `Route sent (${count} waypoints)`;
+            } else {
+              goalStatusEl.textContent = 'Goal sent — navigating...';
+            }
             goalStatusEl.className = 'status good';
           } else {
             goalStatusEl.textContent = `Goal failed: ${msg.error || 'error'}`;
@@ -902,10 +1096,6 @@
           if (msg.ok) {
             goalStatusEl.textContent = 'Goal cancelled';
             goalStatusEl.className = 'status';
-            if (state.goalMarker) {
-              map.removeLayer(state.goalMarker);
-              state.goalMarker = null;
-            }
           } else {
             goalStatusEl.textContent = `Cancel failed: ${msg.error || 'error'}`;
             goalStatusEl.className = 'status bad';
@@ -917,6 +1107,7 @@
             if (enabled) {
               goalStatusEl.textContent = 'Manual control enabled';
               goalStatusEl.className = 'status good';
+              cancelGoalDraft();
               setGoalModeUi(false);
               startManualLoop();
             } else {
@@ -1185,38 +1376,29 @@
 
     document.getElementById('goalModeBtn').addEventListener('click', () => {
       if (state.manualControl.enabled) {
-        setStatus('Disable manual control before setting a goal', false);
+        setStatus('Disable manual control before editing waypoints', false);
         return;
       }
       if (!isGpsMainView()) {
-        setStatus('GPS en minimapa: intercambiá a GPS grande para fijar goals', false);
+        setStatus('GPS en minimapa: intercambiá a GPS grande para editar waypoints', false);
         return;
       }
       setGoalModeUi(!state.goalMode);
     });
 
-    document.getElementById('cancelGoalBtn').addEventListener('click', () => {
-      send({ op: 'cancel_goal' });
+    document.getElementById('sendGoalsBtn').addEventListener('click', () => {
+      sendCurrentWaypoints();
     });
 
-    document.getElementById('resendGoalBtn').addEventListener('click', () => {
-      if (state.manualControl.enabled) {
-        setStatus('Disable manual control before sending a goal', false);
-        return;
-      }
-      if (!state.lastGoal || !Number.isFinite(state.lastGoal.lat) || !Number.isFinite(state.lastGoal.lon)) {
-        setStatus('No previous goal available to resend', false);
-        return;
-      }
+    document.getElementById('clearGoalsBtn').addEventListener('click', () => {
+      clearWaypoints();
+      const goalStatusEl = document.getElementById('goalStatus');
+      goalStatusEl.textContent = 'Waypoints cleared';
+      goalStatusEl.className = 'status';
+    });
 
-      if (state.goalMarker) map.removeLayer(state.goalMarker);
-      state.goalMarker = L.marker([state.lastGoal.lat, state.lastGoal.lon], { icon: goalIcon }).addTo(map);
-      send({
-        op: 'set_goal_ll',
-        lat: state.lastGoal.lat,
-        lon: state.lastGoal.lon,
-        yaw_deg: Number(state.lastGoal.yaw_deg || 0)
-      });
+    document.getElementById('cancelGoalBtn').addEventListener('click', () => {
+      send({ op: 'cancel_goal' });
     });
 
     document.getElementById('manualModeBtn').addEventListener('click', () => {
@@ -1335,27 +1517,25 @@
       }
     });
 
-    map.on('click', (e) => {
-      if (!state.goalMode) return;
-      if (!isGpsMainView()) return;
-      const { lat, lng } = e.latlng;
+    map.on('mousedown', (e) => {
+      if (!state.goalMode || !isGpsMainView()) return;
+      if (state.manualControl.enabled) return;
+      startGoalDraft(e.latlng);
+    });
 
-      // Show marker on map
-      if (state.goalMarker) map.removeLayer(state.goalMarker);
-      state.goalMarker = L.marker([lat, lng], { icon: goalIcon }).addTo(map);
-      state.lastGoal = { lat, lon: lng, yaw_deg: 0 };
-      updateResendGoalBtnState();
+    map.on('mousemove', (e) => {
+      if (!state.goalDraft) return;
+      updateGoalDraft(e.latlng);
+    });
 
-      // Send to server
-      send({
-        op: 'set_goal_ll',
-        lat: state.lastGoal.lat,
-        lon: state.lastGoal.lon,
-        yaw_deg: state.lastGoal.yaw_deg
-      });
+    map.on('mouseup', () => {
+      if (!state.goalDraft) return;
+      finishGoalDraft();
+    });
 
-      // Exit goal mode
-      setGoalModeUi(false);
+    window.addEventListener('mouseup', () => {
+      if (!state.goalDraft) return;
+      finishGoalDraft();
     });
 
     document.getElementById('cameraFrame').src = CAMERA_IFRAME_URL;
@@ -1364,7 +1544,9 @@
     renderManualStatus();
     updateCameraStatusUi(state.cameraStatus);
     renderZoneList({ zones: state.lastZones });
-    updateResendGoalBtnState();
+    updateGoalButtonsState();
+    updateWaypointStatus();
+    renderGoalWaypoints();
   </script>
 </body>
 </html>

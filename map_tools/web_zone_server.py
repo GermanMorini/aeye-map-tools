@@ -501,22 +501,35 @@ class WebZoneServerNode(Node):
         self._update_nav_state(res)
         return True, ""
 
-    def set_nav_goal(self, lat: float, lon: float, yaw_deg: float) -> Tuple[bool, str]:
+    def set_nav_goals(
+        self, waypoints: List[Dict[str, float]], loop: bool
+    ) -> Tuple[bool, str, int, bool]:
+        if len(waypoints) == 0:
+            return False, "at least one waypoint is required", 0, False
+
         self.get_logger().info(
-            f"WS->ROS set_nav_goal (lat={lat:.8f}, lon={lon:.8f}, yaw={yaw_deg:.2f})"
+            f"WS->ROS set_nav_goals (count={len(waypoints)}, loop={bool(loop)})"
         )
         req = SetNavGoalLL.Request()
-        req.lat = float(lat)
-        req.lon = float(lon)
-        req.yaw_deg = float(yaw_deg)
+
+        req.lats = [float(wp["lat"]) for wp in waypoints]
+        req.lons = [float(wp["lon"]) for wp in waypoints]
+        req.yaws_deg = [float(wp.get("yaw_deg", 0.0)) for wp in waypoints]
+        req.loop = bool(loop)
+
+        # Keep legacy single-goal fields populated for compatibility.
+        req.lat = float(req.lats[0])
+        req.lon = float(req.lons[0])
+        req.yaw_deg = float(req.yaws_deg[0])
+
         res = self._call_service(self._nav_set_goal_client, req, self.set_goal_timeout_s)
         if res is None:
-            return False, "set_goal_ll timeout"
+            return False, "set_goal_ll timeout", len(waypoints), bool(loop)
         if not res.ok:
-            self.get_logger().warning(f"set_nav_goal failed: {res.error}")
+            self.get_logger().warning(f"set_nav_goals failed: {res.error}")
         else:
-            self.get_logger().info("set_nav_goal ok")
-        return bool(res.ok), str(res.error)
+            self.get_logger().info("set_nav_goals ok")
+        return bool(res.ok), str(res.error), len(waypoints), bool(loop)
 
     def cancel_nav_goal(self) -> Tuple[bool, str]:
         req = CancelNavGoal.Request()
@@ -694,6 +707,42 @@ class WebSocketApi:
     def __init__(self, node: WebZoneServerNode):
         self.node = node
 
+    def _parse_waypoints_from_message(
+        self, msg: Dict[str, Any]
+    ) -> Tuple[Optional[List[Dict[str, float]]], bool, str]:
+        loop = bool(msg.get("loop", False))
+        waypoints_raw = msg.get("waypoints")
+
+        if waypoints_raw is None:
+            try:
+                lat = float(msg["lat"])
+                lon = float(msg["lon"])
+                yaw_deg = float(msg.get("yaw_deg", 0.0))
+            except (KeyError, ValueError, TypeError) as exc:
+                return None, False, f"invalid parameters: {exc}"
+            if (not np.isfinite(lat)) or (not np.isfinite(lon)) or (not np.isfinite(yaw_deg)):
+                return None, False, "lat/lon/yaw_deg must be finite numbers"
+            return [{"lat": lat, "lon": lon, "yaw_deg": yaw_deg}], loop, ""
+
+        if not isinstance(waypoints_raw, list) or len(waypoints_raw) == 0:
+            return None, False, "waypoints must be a non-empty list"
+
+        waypoints: List[Dict[str, float]] = []
+        for idx, item in enumerate(waypoints_raw):
+            if not isinstance(item, dict):
+                return None, False, f"waypoint[{idx}] must be an object"
+            try:
+                lat = float(item["lat"])
+                lon = float(item["lon"])
+                yaw_deg = float(item.get("yaw_deg", 0.0))
+            except (KeyError, ValueError, TypeError) as exc:
+                return None, False, f"invalid waypoint[{idx}] values: {exc}"
+            if (not np.isfinite(lat)) or (not np.isfinite(lon)) or (not np.isfinite(yaw_deg)):
+                return None, False, f"waypoint[{idx}] values must be finite"
+            waypoints.append({"lat": lat, "lon": lon, "yaw_deg": yaw_deg})
+
+        return waypoints, (loop or (len(waypoints) > 1)), ""
+
     async def handle(self, ws: Any, path: Optional[str] = None) -> None:
         _ = path
         self.node.add_client(ws)
@@ -779,23 +828,22 @@ class WebSocketApi:
             return
 
         if op == "set_goal_ll":
-            try:
-                lat = float(msg["lat"])
-                lon = float(msg["lon"])
-                yaw = float(msg.get("yaw_deg", 0.0))
-            except (KeyError, ValueError, TypeError) as exc:
+            waypoints, loop_enabled, parse_err = self._parse_waypoints_from_message(msg)
+            if waypoints is None:
                 await ws.send(
                     json.dumps(
                         {
                             "op": "ack",
                             "ok": False,
                             "request": "set_goal_ll",
-                            "error": f"invalid parameters: {exc}",
+                            "error": parse_err,
                         }
                     )
                 )
                 return
-            ok, err = await asyncio.to_thread(self.node.set_nav_goal, lat, lon, yaw)
+            ok, err, waypoint_count, loop_used = await asyncio.to_thread(
+                self.node.set_nav_goals, waypoints, loop_enabled
+            )
             await ws.send(
                 json.dumps(
                     {
@@ -803,6 +851,8 @@ class WebSocketApi:
                         "ok": ok,
                         "request": "set_goal_ll",
                         "error": None if ok else err,
+                        "waypoint_count": int(waypoint_count),
+                        "loop": bool(loop_used),
                     }
                 )
             )
