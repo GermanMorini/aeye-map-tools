@@ -27,7 +27,6 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "zone_server = map_tools.web_zone_server:main",
             "web_zone_server = map_tools.web_zone_server:main",
         ],
     },
