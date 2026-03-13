@@ -182,8 +182,9 @@
       left: auto;
       right: 14px;
       bottom: 14px;
-      width: 600px;
-      height: 388px;
+      width: 450px;
+      aspect-ratio: 600 / 388;
+      height: auto;
       opacity: 0.97;
       pointer-events: none;
     }
@@ -201,8 +202,9 @@
       left: auto;
       right: 14px;
       bottom: 14px;
-      width: 600px;
-      height: 388px;
+      width: 450px;
+      aspect-ratio: 600 / 388;
+      height: auto;
       z-index: 1100;
       border: 1px solid #5d7590;
       border-radius: 10px;
@@ -1566,14 +1568,14 @@
       send({ op: 'get_nav_snapshot' });
     });
     const ptzAngles = [
-      { id: 'ptz_angle_135', angle: 135 },
-      { id: 'ptz_angle_90', angle: 90 },
-      { id: 'ptz_angle_45', angle: 45 },
-      { id: 'ptz_angle_180', angle: 180 },
-      { id: 'ptz_angle_0', angle: 0 },
-      { id: 'ptz_angle_m135', angle: -135 },
-      { id: 'ptz_angle_m90', angle: -90 },
-      { id: 'ptz_angle_m45', angle: -45 },
+      { id: 'ptz_angle_135', angle: 45 },
+      { id: 'ptz_angle_90', angle: 0 },
+      { id: 'ptz_angle_45', angle: -45 },
+      { id: 'ptz_angle_180', angle: 90 },
+      { id: 'ptz_angle_0', angle: -90 },
+      { id: 'ptz_angle_m135', angle: 135 },
+      { id: 'ptz_angle_m90', angle: 180 },
+      { id: 'ptz_angle_m45', angle: -135 },
     ];
     for (const item of ptzAngles) {
       const btn = document.getElementById(item.id);
