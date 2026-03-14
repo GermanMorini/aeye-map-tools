@@ -26,7 +26,7 @@
     }
     .layout {
       display: grid;
-      grid-template-columns: 360px 1fr;
+      grid-template-columns: 400px 1fr;
       gap: 12px;
       height: 100vh;
       padding: 12px;
@@ -45,6 +45,78 @@
       gap: 12px;
       min-width: 0;
       height: calc(100vh - 24px);
+    }
+    .visual-top-row {
+      display: flex;
+      align-items: stretch;
+      gap: 12px;
+      min-width: 0;
+    }
+    .visual-top-row:empty {
+      display: none;
+    }
+    .visual-top-row .panel-section.telemetry {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .visual-top-row .panel-section.camera {
+      flex: 0 0 150px;
+      min-width: 150px;
+      max-width: 150px;
+      padding: 8px;
+    }
+    .visual-top-row .panel-section.camera h2 {
+      margin: 0 0 4px 0;
+      font-size: 12px;
+      text-align: center;
+    }
+    .visual-top-row .panel-section.camera .stack {
+      gap: 4px;
+    }
+    .visual-top-row .panel-section.camera .ptz-grid {
+      gap: 4px;
+    }
+    .visual-top-row .panel-section.camera .ptz-grid button {
+      min-height: 28px;
+      padding: 4px;
+      font-size: 12px;
+    }
+    .visual-top-row .panel-section.sliders {
+      flex: 0 0 230px;
+      min-width: 230px;
+      max-width: 230px;
+      padding: 6px 8px;
+    }
+    .visual-top-row .panel-section.sliders h2 {
+      margin: 0 0 6px 0;
+      font-size: 12px;
+      text-align: center;
+    }
+    .visual-top-row .panel-section.sliders .stack {
+      gap: 4px;
+    }
+    .visual-top-row .panel-section.sliders label {
+      font-size: 12px !important;
+    }
+    .panel-section.sliders .stack {
+      gap: 2px;
+    }
+    .panel-section.sliders label {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.15;
+    }
+    .panel-section.sliders input[type="range"] {
+      border: 0;
+      background: transparent;
+      border-radius: 0;
+      padding: 0;
+      margin: 0 0 2px 0;
+      height: 16px;
+    }
+    .visual-top-row .panel-section.sliders input[type="range"] {
+      margin: 0;
+      height: 14px;
     }
     .status-board {
       background: #ffffff;
@@ -151,14 +223,14 @@
       filter: none;
     }
     button.secondary.active {
-      background: #b42318;
-      border-color: #7e150d;
-      color: #ffffff;
+      background: #facc15;
+      border-color: #ca8a04;
+      color: #1f2937;
     }
     button.secondary.manual-on {
-      background: #0f7a3c;
-      border-color: #0a582a;
-      color: #ffffff;
+      background: #facc15;
+      border-color: #ca8a04;
+      color: #1f2937;
     }
     button.danger {
       background: linear-gradient(180deg, #d93629, #a82015);
@@ -324,7 +396,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      transform-origin: 50% 50%;
+      transform-origin: 50% 25%;
     }
     .wp-icon .wp-arrow {
       width: 0;
@@ -354,6 +426,19 @@
       border-bottom-color: #f59e0b;
       opacity: 0.9;
     }
+    .wp-icon.selected .wp-arrow {
+      border-bottom-color: #2563eb;
+      filter: drop-shadow(0 0 3px rgba(37, 99, 235, 0.85));
+    }
+    .wp-icon.selected {
+      cursor: pointer;
+    }
+    .wp-icon.selected .wp-index {
+      color: #1e3a8a;
+      background: rgba(219, 234, 254, 0.97);
+      border-color: #1d4ed8;
+      box-shadow: 0 0 0 1px rgba(147, 197, 253, 0.9);
+    }
     .robot-icon {
       width: 40px;
       height: 40px;
@@ -362,6 +447,7 @@
       align-items: center;
       justify-content: center;
       transform-origin: 50% 50%;
+      filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.55));
     }
     .robot-icon .robot-arrow {
       position: absolute;
@@ -374,23 +460,8 @@
       clip-path: polygon(50% 0%, 100% 66%, 66% 62%, 50% 100%, 34% 62%, 0% 66%);
       filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.75));
     }
-    .robot-icon .robot-core {
-      position: absolute;
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: #ffffff;
-      border: 1px solid #0b5a87;
-      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8);
-    }
     .robot-icon.no-heading .robot-arrow {
-      display: none;
-    }
-    .robot-icon.no-heading .robot-core {
-      width: 9px;
-      height: 9px;
-      border-width: 3px;
-      background: #38bdf8;
+      opacity: 0.55;
     }
     .ptz-grid {
       display: grid;
@@ -464,11 +535,18 @@
     }
     @media (max-width: 1080px) {
       .layout { grid-template-columns: 1fr; height: auto; }
+      .visual-top-row { display: none; }
       .panel-sections {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 12px;
       }
+      .panel-section.connection { order: 1; }
+      .panel-section.sliders { order: 2; }
+      .panel-section.camera { order: 3; }
+      .panel-section.zones { order: 4; }
+      .panel-section.navigation { order: 5; }
+      .panel-section.telemetry { order: 6; }
       .panel-section.connection,
       .panel-section.telemetry {
         grid-column: 1 / -1;
@@ -496,11 +574,11 @@
 <body>
   <div class="layout">
     <div class="panel">
-      <div class="panel-sections">
+      <div id="panelSections" class="panel-sections">
         <section class="panel-section connection">
           <div class="section-header">
             <h2>Connection</h2>
-            <div id="status" class="status">Disconnected</div>
+            <div id="connectionState" class="status">disconnected</div>
           </div>
           <div class="stack">
             <div class="row">
@@ -585,6 +663,12 @@
                 </span>
                 <span class="btn-label">Undo</span>
               </button>
+              <button id="removeSelectedGoalsBtn" class="danger" disabled>
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M9 3h6l1 1h5v2H3V4h5zm1 6h2v8h-2zm4 0h2v8h-2zM6 9h2v8H6z"/></svg>
+                </span>
+                <span class="btn-label">Remove</span>
+              </button>
               <button id="clearGoalsBtn" class="danger" disabled>
                 <span class="btn-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><path d="M16 9v10H8V9zm-1.5-6h-5l-1 1H5v2h14V4h-3.5z"/></svg>
@@ -629,21 +713,21 @@
           </div>
         </section>
 
-        <section class="panel-section sliders">
+        <section id="slidersSection" class="panel-section sliders">
           <h2>Sliders</h2>
-          <div class="stack" style="gap:4px;">
-            <label style="font-size:13px;">
+          <div class="stack">
+            <label>
               Linear speed max: <span id="manualLinearValue">1.20</span> m/s
             </label>
             <input id="manualLinearSlider" type="range" min="1.0" max="4.0" step="0.01" value="1.20" />
-            <label style="font-size:13px;">
+            <label>
               Angular speed max: <span id="manualAngularValue">0.40</span> rad/s
             </label>
             <input id="manualAngularSlider" type="range" min="0.1" max="0.4" step="0.01" value="0.40" />
           </div>
         </section>
 
-        <section class="panel-section camera">
+        <section id="cameraSection" class="panel-section camera">
           <h2>Camera PTZ</h2>
           <div class="stack">
             <div class="ptz-grid">
@@ -662,9 +746,9 @@
           </div>
         </section>
 
-        <section class="panel-section telemetry">
-          <h2>Telemetry</h2>
+        <section id="telemetrySection" class="panel-section telemetry">
           <div class="status-board">
+            <div id="status" class="status">Disconnected</div>
             <div id="goalStatus" class="status">No active goal</div>
             <div id="waypointStatus" class="status">Waypoints: 0</div>
             <div id="cmdVelSafeStatus" class="status">cmd_vel_safe: n/a</div>
@@ -674,7 +758,8 @@
         </section>
       </div>
     </div>
-    <div class="visual-col">
+    <div id="visualCol" class="visual-col">
+      <div id="visualTopRow" class="visual-top-row"></div>
       <div id="viewStage" class="mode-camera-main">
         <div id="cameraPane" class="view-pane">
           <iframe id="cameraFrame" title="Camera feed" loading="lazy"></iframe>
@@ -752,7 +837,11 @@
       primaryView: 'camera',
       goalMode: false,
       goalWaypoints: [],
+      selectedWaypointIndices: new Set(),
+      pendingGoalAfterManualOff: null,
       goalDraft: null,
+      goalCreateSession: { active: false, pointerId: null, hasMoved: false },
+      lastWaypointDragEndMs: 0,
       lastSnapshot: null,
       cmdVelSafe: null,
       cameraStatus: { ok: false, error: 'camera status unavailable', last_command: 'none', zoom_in: false },
@@ -766,7 +855,10 @@
       requestRegistry: new Map(),
       pendingByOp: new Map(),
       pendingIdsByOp: new Map(),
-      buttonBaseLabels: new Map()
+      buttonBaseLabels: new Map(),
+      connectAttemptActive: false,
+      connectErrorDialogShown: false,
+      userInitiatedDisconnect: false
     };
 
     const MANUAL_LOOP_HZ = 20.0;
@@ -818,10 +910,18 @@
 
     function setStatus(text, ok = null) {
       const s = document.getElementById('status');
+      if (!s) return;
       s.textContent = text;
       s.className = 'status';
       if (ok === true) s.classList.add('good');
       if (ok === false) s.classList.add('bad');
+    }
+
+    function setConnectionState(connected) {
+      const el = document.getElementById('connectionState');
+      if (!el) return;
+      el.textContent = connected ? 'connected' : 'disconnected';
+      el.className = connected ? 'status good' : 'status';
     }
 
     function getButtonLabelText(buttonId) {
@@ -841,6 +941,13 @@
       } else {
         btn.textContent = text;
       }
+    }
+
+    function setConnectButtonConnecting(connecting) {
+      const btn = document.getElementById('connectBtn');
+      if (!btn) return;
+      setButtonLabelText('connectBtn', connecting ? 'Connecting...' : 'Connect');
+      btn.disabled = connecting === true;
     }
 
     function initializeTrackedButtonsUi() {
@@ -965,12 +1072,12 @@
       return normalizeYawDeg(yawDeg);
     }
 
-    function buildWaypointIcon(index, yawDeg, draft = false) {
+    function buildWaypointIcon(index, yawDeg, draft = false, selected = false) {
       const yaw = normalizeYawDeg(yawDeg);
       // ROS yaw: 0 deg = +X (east), CCW positive.
       // CSS rotate: clockwise positive, and icon base points north (up).
       const cssRotationDeg = normalizeYawDeg(90.0 - yaw);
-      const cls = draft ? 'wp-icon draft' : 'wp-icon';
+      const cls = `wp-icon${draft ? ' draft' : ''}${selected ? ' selected' : ''}`;
       return L.divIcon({
         className: '',
         html:
@@ -979,7 +1086,7 @@
             `<div class="wp-index">${Number(index) + 1}</div>` +
           '</div>',
         iconSize: [30, 30],
-        iconAnchor: [15, 15]
+        iconAnchor: [15, 8]
       });
     }
 
@@ -993,7 +1100,6 @@
         html:
           `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);">` +
             '<div class="robot-arrow"></div>' +
-            '<div class="robot-core"></div>' +
           '</div>',
         iconSize: [40, 40],
         iconAnchor: [20, 20]
@@ -1015,9 +1121,58 @@
     function renderGoalWaypoints() {
       goalLayer.clearLayers();
       state.goalWaypoints.forEach((wp, idx) => {
+        const selected = state.selectedWaypointIndices.has(idx);
         const marker = L.marker([wp.lat, wp.lon], {
-          icon: buildWaypointIcon(idx, wp.yaw_deg, false),
-          interactive: false
+          icon: buildWaypointIcon(idx, wp.yaw_deg, false, selected),
+          interactive: true,
+          draggable: true
+        });
+        marker.on('dragstart', () => {
+          if (state.goalDraft) {
+            cancelGoalDraft();
+          }
+          cancelGoalCreateSession();
+          if (map.dragging.enabled()) {
+            map.dragging.disable();
+          }
+        });
+        marker.on('drag', (evt) => {
+          const current = state.goalWaypoints[idx];
+          if (!current) return;
+          const latLng = evt.target.getLatLng();
+          current.lat = Number(latLng.lat);
+          current.lon = Number(latLng.lng);
+        });
+        marker.on('dragend', (evt) => {
+          const current = state.goalWaypoints[idx];
+          const latLng = evt.target.getLatLng();
+          if (current) {
+            current.lat = Number(latLng.lat);
+            current.lon = Number(latLng.lng);
+          }
+          state.lastWaypointDragEndMs = Date.now();
+          if (!map.dragging.enabled()) {
+            map.dragging.enable();
+          }
+          renderGoalWaypoints();
+          updateGoalButtonsState();
+          updateWaypointStatus(`Waypoint ${idx + 1} moved`, true);
+        });
+        marker.on('click', (evt) => {
+          if (evt && evt.originalEvent) {
+            L.DomEvent.stop(evt.originalEvent);
+          }
+          if ((Date.now() - Number(state.lastWaypointDragEndMs || 0)) < 250) {
+            return;
+          }
+          if (state.goalDraft) {
+            cancelGoalDraft();
+          }
+          cancelGoalCreateSession();
+          // Force-reset Leaflet drag handler state in case a pointer sequence got desynced.
+          map.dragging.disable();
+          map.dragging.enable();
+          toggleWaypointSelection(idx);
         });
         goalLayer.addLayer(marker);
       });
@@ -1033,16 +1188,52 @@
 
     function updateGoalButtonsState() {
       const hasWaypoints = state.goalWaypoints.length > 0;
+      const hasSelection = state.selectedWaypointIndices.size > 0;
       document.getElementById('sendGoalsBtn').disabled = !hasWaypoints;
       document.getElementById('popGoalBtn').disabled = !hasWaypoints;
       document.getElementById('clearGoalsBtn').disabled = !hasWaypoints;
+      document.getElementById('removeSelectedGoalsBtn').disabled = !hasSelection;
+    }
+
+    function clearWaypointSelection() {
+      state.selectedWaypointIndices.clear();
+    }
+
+    function toggleWaypointSelection(index) {
+      if (!Number.isInteger(index)) return;
+      if (index < 0 || index >= state.goalWaypoints.length) return;
+      if (state.selectedWaypointIndices.has(index)) {
+        state.selectedWaypointIndices.delete(index);
+      } else {
+        state.selectedWaypointIndices.add(index);
+      }
+      renderGoalWaypoints();
+      updateGoalButtonsState();
+    }
+
+    function removeSelectedWaypoints() {
+      const selectedCount = state.selectedWaypointIndices.size;
+      if (selectedCount <= 0) {
+        updateWaypointStatus('No selected waypoints to remove', false);
+        return;
+      }
+      const label = selectedCount === 1 ? 'waypoint' : 'waypoints';
+      const confirmed = window.confirm(`Remove ${selectedCount} selected ${label}?`);
+      if (!confirmed) return;
+
+      state.goalWaypoints = state.goalWaypoints.filter((_, idx) => !state.selectedWaypointIndices.has(idx));
+      clearWaypointSelection();
+      state.goalDraft = null;
+      renderGoalWaypoints();
+      updateGoalButtonsState();
+      updateWaypointStatus(`Removed ${selectedCount} ${label}`, true);
     }
 
     function setGoalModeUi(enabled) {
       state.goalMode = enabled === true;
       const btn = document.getElementById('goalModeBtn');
+      btn.textContent = 'Waypoint Mode';
       if (state.goalMode) {
-        btn.textContent = 'Waypoint Mode - ACTIVE';
         btn.classList.add('active');
         map.getContainer().style.cursor = 'crosshair';
         updateWaypointStatus(
@@ -1050,7 +1241,6 @@
           true
         );
       } else {
-        btn.textContent = 'Waypoint Mode';
         btn.classList.remove('active');
         map.getContainer().style.cursor = '';
       }
@@ -1062,6 +1252,7 @@
         lon: Number(lon),
         yaw_deg: normalizeYawDeg(yawDeg)
       });
+      clearWaypointSelection();
       renderGoalWaypoints();
       updateGoalButtonsState();
       updateWaypointStatus();
@@ -1069,6 +1260,7 @@
 
     function clearWaypoints() {
       state.goalWaypoints = [];
+      clearWaypointSelection();
       state.goalDraft = null;
       renderGoalWaypoints();
       updateGoalButtonsState();
@@ -1081,6 +1273,10 @@
         return;
       }
       state.goalWaypoints.pop();
+      state.selectedWaypointIndices = new Set(
+        Array.from(state.selectedWaypointIndices)
+          .filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < state.goalWaypoints.length)
+      );
       renderGoalWaypoints();
       updateGoalButtonsState();
       updateWaypointStatus();
@@ -1105,10 +1301,6 @@
     }
 
     function sendCurrentWaypoints() {
-      if (state.manualControl.enabled) {
-        setStatus('Disable manual control before sending waypoints', false);
-        return;
-      }
       if (state.goalWaypoints.length === 0) {
         updateWaypointStatus('Add at least one waypoint before sending', false);
         return;
@@ -1119,11 +1311,46 @@
         yaw_deg: Number(wp.yaw_deg || 0.0)
       }));
       const loopEnabled = Boolean(document.getElementById('goalLoop')?.checked);
-      send({
+      const goalRequest = {
         op: 'set_goal_ll',
         waypoints: payloadWaypoints,
         loop: loopEnabled
-      });
+      };
+      if (state.manualControl.enabled) {
+        state.pendingGoalAfterManualOff = goalRequest;
+        const reqId = send({ op: 'set_manual_mode', enabled: false });
+        if (reqId == null) {
+          state.pendingGoalAfterManualOff = null;
+          return;
+        }
+        const goalStatusEl = document.getElementById('goalStatus');
+        goalStatusEl.textContent = 'Disabling manual control to send waypoints...';
+        goalStatusEl.className = 'status';
+        return;
+      }
+      send(goalRequest);
+    }
+
+    function ensureMapDraggingEnabled() {
+      if (!map.dragging.enabled()) {
+        map.dragging.enable();
+      }
+    }
+
+    function clearGoalCreateSessionState() {
+      const session = state.goalCreateSession || { active: false, pointerId: null, hasMoved: false };
+      const pointerId = session.pointerId;
+      if (pointerId != null && typeof map.getContainer().releasePointerCapture === 'function') {
+        try {
+          map.getContainer().releasePointerCapture(pointerId);
+        } catch (err) {
+          // Ignore release errors when pointer capture is already gone.
+        }
+      }
+      session.active = false;
+      session.pointerId = null;
+      session.hasMoved = false;
+      state.goalCreateSession = session;
     }
 
     function startGoalDraft(latlng) {
@@ -1133,9 +1360,6 @@
         yaw_deg: 0.0,
         dragYaw: false
       };
-      if (map.dragging.enabled()) {
-        map.dragging.disable();
-      }
       renderGoalWaypoints();
     }
 
@@ -1152,23 +1376,29 @@
     }
 
     function finishGoalDraft() {
-      if (!state.goalDraft) return;
+      if (!state.goalDraft) {
+        clearGoalCreateSessionState();
+        ensureMapDraggingEnabled();
+        return false;
+      }
       const draft = state.goalDraft;
       addWaypoint(draft.lat, draft.lon, draft.yaw_deg);
       state.goalDraft = null;
       renderGoalWaypoints();
-      if (!map.dragging.enabled()) {
-        map.dragging.enable();
-      }
+      clearGoalCreateSessionState();
+      ensureMapDraggingEnabled();
+      return true;
     }
 
     function cancelGoalDraft() {
-      if (!state.goalDraft) return;
+      if (!state.goalDraft && !state.goalCreateSession.active) {
+        ensureMapDraggingEnabled();
+        return;
+      }
       state.goalDraft = null;
       renderGoalWaypoints();
-      if (!map.dragging.enabled()) {
-        map.dragging.enable();
-      }
+      clearGoalCreateSessionState();
+      ensureMapDraggingEnabled();
     }
 
     function applyViewMode() {
@@ -1411,15 +1641,34 @@
       if (!state.manualControl.enabled) {
         stopManualLoop();
         resetManualLocalState();
+        if (state.pendingGoalAfterManualOff) {
+          const goalRequest = state.pendingGoalAfterManualOff;
+          state.pendingGoalAfterManualOff = null;
+          send(goalRequest);
+        }
       } else if (!state.manualLoopTimer) {
         startManualLoop();
       }
       renderManualStatus();
     }
 
+    function showNoConnectionDialog() {
+      const msg = 'No hay conexion con el servidor.';
+      setStatus(msg, false);
+      window.alert(msg);
+    }
+
+    function showConnectionLostDialog() {
+      window.alert('Se perdio la conexion con el servidor.');
+    }
+
+    function showConnectionFailedDialog() {
+      window.alert('No se pudo establecer la conexion con el servidor.');
+    }
+
     function send(payload, options = {}) {
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
-        setStatus('WebSocket not connected', false);
+        showNoConnectionDialog();
         return null;
       }
       const outbound = Object.assign({}, payload || {});
@@ -1497,23 +1746,52 @@
     }
 
     function connectWs() {
+      if (state.ws && state.ws.readyState === WebSocket.CONNECTING) {
+        setStatus('Connection already in progress', false);
+        setConnectButtonConnecting(true);
+        return;
+      }
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        setStatus('Already connected', true);
+        setConnectButtonConnecting(false);
+        return;
+      }
+
       const [url, urlErr] = buildWsUrlFromFields();
       if (!url) {
+        setConnectButtonConnecting(false);
+        state.connectAttemptActive = false;
         setStatus(urlErr || 'Invalid WebSocket host/port', false);
         return;
       }
 
+      setConnectButtonConnecting(true);
+      state.connectAttemptActive = true;
+      state.connectErrorDialogShown = false;
+      state.userInitiatedDisconnect = false;
       state.ws = new WebSocket(url);
 
       state.ws.onopen = () => {
         state.connected = true;
+        setConnectionState(true);
+        state.connectAttemptActive = false;
+        state.connectErrorDialogShown = false;
+        setConnectButtonConnecting(false);
         setStatus(`Connected to ${url}`, true);
         send({ op: 'get_state' }, { track: false });
         send({ op: 'get_camera_status' }, { track: false });
       };
 
       state.ws.onclose = () => {
+        const wasConnected = state.connected === true;
+        const wasAttempting = state.connectAttemptActive === true;
+        const userRequested = state.userInitiatedDisconnect === true;
         state.connected = false;
+        setConnectionState(false);
+        state.connectAttemptActive = false;
+        state.userInitiatedDisconnect = false;
+        setConnectButtonConnecting(false);
+        state.pendingGoalAfterManualOff = null;
         clearAllPendingRequests();
         setStatus('Disconnected', false);
         stopManualLoop();
@@ -1521,9 +1799,20 @@
         state.manualControl.enabled = false;
         renderManualStatus();
         updateCameraStatusUi({ ok: false, error: 'disconnected', last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
+        if (!userRequested && wasConnected) {
+          showConnectionLostDialog();
+        } else if (!userRequested && wasAttempting && !state.connectErrorDialogShown) {
+          showConnectionFailedDialog();
+        }
+        state.connectErrorDialogShown = false;
       };
 
       state.ws.onerror = () => {
+        setConnectButtonConnecting(false);
+        if (state.connectAttemptActive && !state.connectErrorDialogShown) {
+          showConnectionFailedDialog();
+          state.connectErrorDialogShown = true;
+        }
         setStatus('WebSocket error', false);
       };
 
@@ -1546,6 +1835,12 @@
     }
 
     function disconnectWs() {
+      setConnectButtonConnecting(false);
+      setConnectionState(false);
+      state.connectAttemptActive = false;
+      state.connectErrorDialogShown = false;
+      state.userInitiatedDisconnect = true;
+      state.pendingGoalAfterManualOff = null;
       if (state.ws && state.ws.readyState === WebSocket.OPEN && state.manualControl.enabled) {
         send({ op: 'set_manual_mode', enabled: false });
       }
@@ -1667,18 +1962,28 @@
             if (enabled) {
               goalStatusEl.textContent = 'Manual control enabled';
               goalStatusEl.className = 'status good';
-              cancelGoalDraft();
-              setGoalModeUi(false);
               startManualLoop();
             } else {
               goalStatusEl.textContent = 'Manual control disabled';
               goalStatusEl.className = 'status';
               stopManualLoop();
               resetManualLocalState();
+              if (state.pendingGoalAfterManualOff) {
+                const goalRequest = state.pendingGoalAfterManualOff;
+                state.pendingGoalAfterManualOff = null;
+                goalStatusEl.textContent = 'Manual disabled. Sending waypoints...';
+                goalStatusEl.className = 'status';
+                send(goalRequest);
+              }
             }
             renderManualStatus();
           } else {
-            goalStatusEl.textContent = `Manual mode failed: ${msg.error || 'error'}`;
+            if (state.pendingGoalAfterManualOff) {
+              state.pendingGoalAfterManualOff = null;
+              goalStatusEl.textContent = `Cannot send goals: failed to disable manual mode (${msg.error || 'error'})`;
+            } else {
+              goalStatusEl.textContent = `Manual mode failed: ${msg.error || 'error'}`;
+            }
             goalStatusEl.className = 'status bad';
           }
         } else if (msg.request === 'set_manual_cmd') {
@@ -1698,6 +2003,7 @@
             const raw = Array.isArray(msg.waypoints) ? msg.waypoints : [];
             const waypoints = raw.map(normalizeIncomingWaypoint).filter((wp) => wp !== null);
             state.goalWaypoints = waypoints;
+            clearWaypointSelection();
             state.goalDraft = null;
             renderGoalWaypoints();
             updateGoalButtonsState();
@@ -1881,6 +2187,151 @@
       };
     }
 
+    function isEventFromWaypointMarker(domEvent) {
+      if (!domEvent || !domEvent.target || typeof domEvent.target.closest !== 'function') {
+        return false;
+      }
+      return Boolean(
+        domEvent.target.closest('.wp-icon') ||
+        domEvent.target.closest('.leaflet-marker-icon')
+      );
+    }
+
+    function isMapBackgroundPointerEvent(domEvent) {
+      if (!domEvent || !domEvent.target || typeof domEvent.target.closest !== 'function') {
+        return false;
+      }
+      if (isEventFromWaypointMarker(domEvent)) return false;
+      if (domEvent.target.closest('.leaflet-control-container')) return false;
+      if (domEvent.target.closest('.leaflet-popup-pane')) return false;
+      if (domEvent.target.closest('.leaflet-draw-tooltip')) return false;
+      if (domEvent.target.closest('.leaflet-interactive')) return false;
+      return true;
+    }
+
+    function isMatchingGoalPointer(domEvent) {
+      const session = state.goalCreateSession;
+      if (!session.active) return false;
+      if (session.pointerId == null) return true;
+      return domEvent && domEvent.pointerId === session.pointerId;
+    }
+
+    function beginGoalCreateSession(domEvent) {
+      if (!state.goalMode || !isGpsMainView()) return;
+      if (!domEvent) return;
+      if (state.goalCreateSession.active) return;
+      if (domEvent.defaultPrevented) return;
+      if (typeof domEvent.button === 'number' && domEvent.button !== 0) return;
+      if (!isMapBackgroundPointerEvent(domEvent)) return;
+
+      const latlng = map.mouseEventToLatLng(domEvent);
+      const session = state.goalCreateSession;
+      session.active = true;
+      session.pointerId = (domEvent.pointerId == null) ? null : domEvent.pointerId;
+      session.hasMoved = false;
+
+      startGoalDraft(latlng);
+      if (map.dragging.enabled()) {
+        map.dragging.disable();
+      }
+      if (session.pointerId != null && typeof map.getContainer().setPointerCapture === 'function') {
+        try {
+          map.getContainer().setPointerCapture(session.pointerId);
+        } catch (err) {
+          // Ignore capture errors if browser/element does not support it.
+        }
+      }
+      domEvent.preventDefault();
+      domEvent.stopPropagation();
+    }
+
+    function updateGoalCreateSession(domEvent) {
+      if (!isMatchingGoalPointer(domEvent)) return;
+      if (!state.goalDraft) return;
+
+      const latlng = map.mouseEventToLatLng(domEvent);
+      const origin = L.latLng(state.goalDraft.lat, state.goalDraft.lon);
+      if (map.distance(origin, latlng) > 0.35) {
+        state.goalCreateSession.hasMoved = true;
+      }
+      updateGoalDraft(latlng);
+      domEvent.preventDefault();
+      domEvent.stopPropagation();
+    }
+
+    function completeGoalCreateSession(domEvent) {
+      if (!isMatchingGoalPointer(domEvent)) {
+        recoverMapDraggingAfterWaypointPointerUp(domEvent);
+        return;
+      }
+      if (state.goalDraft) {
+        try {
+          const latlng = map.mouseEventToLatLng(domEvent);
+          updateGoalDraft(latlng);
+        } catch (err) {
+          // Keep last valid draft state if pointerup lands outside map bounds.
+        }
+      }
+      finishGoalDraft();
+      domEvent.preventDefault();
+      domEvent.stopPropagation();
+    }
+
+    function cancelGoalCreateSession() {
+      cancelGoalDraft();
+    }
+
+    function recoverMapDraggingAfterWaypointPointerUp(domEvent) {
+      if (state.goalCreateSession.active) return;
+      if (!isEventFromWaypointMarker(domEvent)) return;
+      map.dragging.disable();
+      map.dragging.enable();
+    }
+
+    function relocateTopSections() {
+      const telemetrySection = document.getElementById('telemetrySection');
+      const cameraSection = document.getElementById('cameraSection');
+      const slidersSection = document.getElementById('slidersSection');
+      const panelSections = document.getElementById('panelSections');
+      const visualCol = document.getElementById('visualCol');
+      const visualTopRow = document.getElementById('visualTopRow');
+      const viewStage = document.getElementById('viewStage');
+      if (!telemetrySection || !cameraSection || !slidersSection || !panelSections || !visualCol || !visualTopRow || !viewStage) return;
+
+      const isNarrow = window.matchMedia('(max-width: 1080px)').matches;
+      if (isNarrow) {
+        if (slidersSection.parentElement !== panelSections) {
+          if (cameraSection.parentElement === panelSections) {
+            panelSections.insertBefore(slidersSection, cameraSection);
+          } else if (telemetrySection.parentElement === panelSections) {
+            panelSections.insertBefore(slidersSection, telemetrySection);
+          } else {
+            panelSections.appendChild(slidersSection);
+          }
+        }
+        if (cameraSection.parentElement !== panelSections) {
+          if (telemetrySection.parentElement === panelSections) {
+            panelSections.insertBefore(cameraSection, telemetrySection);
+          } else {
+            panelSections.appendChild(cameraSection);
+          }
+        }
+        if (telemetrySection.parentElement !== panelSections) {
+          panelSections.appendChild(telemetrySection);
+        }
+      } else {
+        if (telemetrySection.parentElement !== visualTopRow) {
+          visualTopRow.appendChild(telemetrySection);
+        }
+        if (slidersSection.parentElement !== visualTopRow) {
+          visualTopRow.appendChild(slidersSection);
+        }
+        if (cameraSection.parentElement !== visualTopRow) {
+          visualTopRow.appendChild(cameraSection);
+        }
+      }
+    }
+
     function pushLayersToServer() {
       const zones = collectZonesFromLayers();
       const geojson = buildGeoJsonFromLayers();
@@ -1957,15 +2408,15 @@
     document.getElementById('saveBtn').addEventListener('click', pushLayersToServer);
     document.getElementById('loadBtn').addEventListener('click', () => send({ op: 'load_zones_file' }));
     document.getElementById('clearBtn').addEventListener('click', () => {
+      const zoneCount = collectZonesFromLayers().length;
+      const zoneLabel = zoneCount === 1 ? 'zone' : 'zones';
+      const confirmed = window.confirm(`Clear all ${zoneCount} no-go ${zoneLabel}?`);
+      if (!confirmed) return;
       drawnItems.clearLayers();
       pushLayersToServer();
     });
 
     document.getElementById('goalModeBtn').addEventListener('click', () => {
-      if (state.manualControl.enabled) {
-        setStatus('Disable manual control before editing waypoints', false);
-        return;
-      }
       if (!isGpsMainView()) {
         setStatus('GPS en minimapa: intercambiá a GPS grande para editar waypoints', false);
         return;
@@ -1996,7 +2447,15 @@
       popLastWaypoint();
     });
 
+    document.getElementById('removeSelectedGoalsBtn').addEventListener('click', () => {
+      removeSelectedWaypoints();
+    });
+
     document.getElementById('clearGoalsBtn').addEventListener('click', () => {
+      const count = state.goalWaypoints.length;
+      const label = count === 1 ? 'waypoint' : 'waypoints';
+      const confirmed = window.confirm(`Clear all ${count} ${label}?`);
+      if (!confirmed) return;
       clearWaypoints();
       const goalStatusEl = document.getElementById('goalStatus');
       goalStatusEl.textContent = 'Waypoints cleared';
@@ -2008,10 +2467,6 @@
     });
 
     document.getElementById('manualModeBtn').addEventListener('click', () => {
-      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
-        setStatus('WebSocket not connected', false);
-        return;
-      }
       const nextEnabled = !state.manualControl.enabled;
       send({ op: 'set_manual_mode', enabled: nextEnabled });
     });
@@ -2130,29 +2585,40 @@
       }
     });
 
-    map.on('mousedown', (e) => {
-      if (!state.goalMode || !isGpsMainView()) return;
-      if (state.manualControl.enabled) return;
-      startGoalDraft(e.latlng);
+    const mapContainer = map.getContainer();
+    mapContainer.addEventListener('pointerdown', beginGoalCreateSession, { passive: false });
+    mapContainer.addEventListener('pointermove', updateGoalCreateSession, { passive: false });
+    mapContainer.addEventListener('pointerup', completeGoalCreateSession, { passive: false });
+    mapContainer.addEventListener('pointercancel', () => {
+      cancelGoalCreateSession();
     });
-
-    map.on('mousemove', (e) => {
-      if (!state.goalDraft) return;
-      updateGoalDraft(e.latlng);
+    mapContainer.addEventListener('contextmenu', (event) => {
+      if (!state.goalCreateSession.active) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelGoalCreateSession();
     });
-
-    map.on('mouseup', () => {
-      if (!state.goalDraft) return;
-      finishGoalDraft();
+    window.addEventListener('blur', () => {
+      cancelGoalCreateSession();
     });
-
-    window.addEventListener('mouseup', () => {
-      if (!state.goalDraft) return;
-      finishGoalDraft();
+    window.addEventListener('pointerup', (event) => {
+      completeGoalCreateSession(event);
+    }, { passive: false });
+    window.addEventListener('pointercancel', () => {
+      cancelGoalCreateSession();
     });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        cancelGoalCreateSession();
+      }
+    });
+    window.addEventListener('resize', relocateTopSections);
 
     document.getElementById('cameraFrame').src = CAMERA_IFRAME_URL;
     initializeTrackedButtonsUi();
+    setConnectButtonConnecting(false);
+    setConnectionState(false);
+    relocateTopSections();
     applyViewMode();
     updateManualSliderLabels();
     renderManualStatus();
