@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
   <style>
     :root {
-      --bg: #edf3f9;
+      --bg: #ffffff;
       --panel: #ffffff;
       --line: #5d7590;
       --text: #102235;
@@ -21,7 +21,7 @@
     body {
       margin: 0;
       font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: linear-gradient(180deg, #f7fbff 0%, var(--bg) 45%, #dce8f4 100%);
+      background: #ffffff;
       color: var(--text);
     }
     .layout {
@@ -33,7 +33,7 @@
     }
     .layout > * { min-width: 0; }
     .panel {
-      background: linear-gradient(180deg, #ffffff, #f6fbff);
+      background: #ffffff;
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 12px;
@@ -47,7 +47,7 @@
       height: calc(100vh - 24px);
     }
     .status-board {
-      background: linear-gradient(180deg, #ffffff, #f6fbff);
+      background: #ffffff;
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 10px 12px;
@@ -65,6 +65,39 @@
       margin: 0 0 8px 0;
       font-size: 16px;
       font-weight: 700;
+    }
+    .panel-sections {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .panel-section {
+      min-width: 0;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+    .panel-section.telemetry .status-board {
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      padding: 0;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .section-header h2 {
+      margin: 0;
+    }
+    .section-header .status {
+      margin: 0;
+      text-align: right;
+      white-space: nowrap;
     }
     .row {
       display: grid;
@@ -95,12 +128,27 @@
       width: 100%;
       min-width: 0;
       white-space: normal;
+      min-height: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: filter 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+      box-shadow: 0 1px 0 rgba(9, 33, 57, 0.25);
+    }
+    button:hover:not(:disabled) {
+      filter: brightness(1.04);
+      transform: translateY(-1px);
     }
     button.secondary {
       background: #e6eef7;
       color: var(--text);
       border: 1px solid #5d7590;
       font-weight: 600;
+    }
+    button.secondary:hover:not(:disabled) {
+      background: #d7e5f3;
+      filter: none;
     }
     button.secondary.active {
       background: #b42318;
@@ -118,9 +166,45 @@
       border: 1px solid #7e150d;
       font-weight: 700;
     }
+    button.success {
+      background: linear-gradient(180deg, #15944a, #0f7a3c);
+      border-color: #0a582a;
+      color: #ffffff;
+    }
+    button.warning {
+      background: linear-gradient(180deg, #d99700, #b86f00);
+      border-color: #8a5100;
+      color: #ffffff;
+    }
     button:disabled {
       opacity: 0.6;
       cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+      outline: 3px solid rgba(0, 94, 196, 0.35);
+      outline-offset: 2px;
+    }
+    .btn-icon {
+      width: 16px;
+      height: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 16px;
+    }
+    .btn-icon svg {
+      width: 16px;
+      height: 16px;
+      display: block;
+      fill: currentColor;
+    }
+    .btn-label {
+      line-height: 1.15;
     }
     .status { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
     .status.good { color: var(--good); }
@@ -342,6 +426,15 @@
     }
     @media (max-width: 1080px) {
       .layout { grid-template-columns: 1fr; height: auto; }
+      .panel-sections {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .panel-section.connection,
+      .panel-section.telemetry {
+        grid-column: 1 / -1;
+      }
       .visual-col { height: auto; }
       #viewStage { height: 60vh; }
       #swapViewBtn {
@@ -365,89 +458,168 @@
 <body>
   <div class="layout">
     <div class="panel">
-      <h2>Connection</h2>
-      <div class="stack">
-        <input id="wsUrl" value="ws://100.111.4.7:8766" />
-        <div class="row">
-          <button id="connectBtn">Connect</button>
-          <button id="disconnectBtn" class="secondary">Disconnect</button>
-        </div>
-      </div>
+      <div class="panel-sections">
+        <section class="panel-section connection">
+          <div class="section-header">
+            <h2>Connection</h2>
+            <div id="status" class="status">Disconnected</div>
+          </div>
+          <div class="stack">
+            <input id="wsUrl" value="ws://100.111.4.7:8766" />
+            <div class="row">
+              <button id="connectBtn">
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2zm-1 14-4-4 1.41-1.41L11 13.17l4.59-4.58L17 10z"/></svg>
+                </span>
+                <span class="btn-label">Connect</span>
+              </button>
+              <button id="disconnectBtn" class="warning">
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2zm3.71 12.29L14.29 15.7 12 13.41 9.71 15.7 8.29 14.29 10.59 12 8.29 9.71 9.71 8.29 12 10.59l2.29-2.3 1.42 1.42L13.41 12z"/></svg>
+                </span>
+                <span class="btn-label">Disconnect</span>
+              </button>
+            </div>
+          </div>
+        </section>
 
-      <h2>Zones</h2>
-      <div class="row">
-        <button id="refreshBtn" class="secondary">Refresh</button>
-        <button id="saveBtn" class="secondary">Save File</button>
-        <button id="loadBtn" class="secondary">Load File</button>
-      </div>
-      <div class="row">
-        <button id="pushBtn">Push To Server</button>
-        <button id="clearBtn" class="secondary">Clear All</button>
-      </div>
-      <div class="row">
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
-          <input id="autoSync" type="checkbox" checked style="width:auto;" /> Auto-sync edits
-        </label>
-      </div>
-      <ul id="zoneList" class="zone-list"></ul>
+        <section class="panel-section zones">
+          <h2>Zones</h2>
+          <div class="row">
+            <button id="refreshBtn" class="secondary">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4V1L7 6l5 5V7a5 5 0 1 1-4.9 6h-2.02A7 7 0 1 0 17.65 6.35z"/></svg>
+              </span>
+              <span class="btn-label">Refresh</span>
+            </button>
+            <button id="saveBtn" class="secondary">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zM7 5h8v4H7zm12 14H5V9h14z"/></svg>
+              </span>
+              <span class="btn-label">Save</span>
+            </button>
+            <button id="loadBtn" class="secondary">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-7 11-3-3h2V9h2v5h2z"/></svg>
+              </span>
+              <span class="btn-label">Load</span>
+            </button>
+          </div>
+          <div class="row">
+            <button id="pushBtn" class="success">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5zm7-18-5.5 5.5 1.42 1.42L11 6.84V16h2V6.84l3.08 3.08 1.42-1.42z"/></svg>
+              </span>
+              <span class="btn-label">Push</span>
+            </button>
+            <button id="clearBtn" class="danger">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M16 9v10H8V9zm-1.5-6h-5l-1 1H5v2h14V4h-3.5z"/></svg>
+              </span>
+              <span class="btn-label">Clear</span>
+            </button>
+          </div>
+          <div class="row">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+              <input id="autoSync" type="checkbox" checked style="width:auto;" /> Auto-sync edits
+            </label>
+          </div>
+          <ul id="zoneList" class="zone-list"></ul>
+        </section>
 
-      <h2>Navigation</h2>
-      <div class="stack">
-        <div class="row">
-          <button id="goalModeBtn" class="secondary">Waypoint Mode</button>
-          <button id="sendGoalsBtn" class="secondary" disabled>Send Waypoints</button>
-          <button id="popGoalBtn" class="secondary" disabled>Undo Last</button>
-          <button id="clearGoalsBtn" class="secondary" disabled>Clear Waypoints</button>
-          <button id="cancelGoalBtn" class="secondary">Cancel Goal</button>
-        </div>
-        <div class="row">
-          <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
-            <input id="goalLoop" type="checkbox" style="width:auto;" /> Loop route
-          </label>
-        </div>
-        <div class="row">
-          <button id="manualModeBtn" class="secondary">Manual Control: OFF</button>
-          <button id="snapshotBtn" class="secondary">Snapshot Nav</button>
-        </div>
-        <div class="stack" style="gap:4px;">
-          <label style="font-size:13px;">
-            Linear speed max: <span id="manualLinearValue">1.20</span> m/s
-          </label>
-          <input id="manualLinearSlider" type="range" min="1.0" max="4.0" step="0.01" value="1.20" />
-          <label style="font-size:13px;">
-            Angular speed max: <span id="manualAngularValue">0.40</span> rad/s
-          </label>
-          <input id="manualAngularSlider" type="range" min="0.1" max="0.4" step="0.01" value="0.40" />
-        </div>
+        <section class="panel-section navigation">
+          <h2>Navigation</h2>
+          <div class="stack">
+            <div class="row">
+              <button id="goalModeBtn" class="secondary">Waypoint Mode</button>
+              <button id="sendGoalsBtn" class="success" disabled>
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg>
+                </span>
+                <span class="btn-label">Send</span>
+              </button>
+              <button id="popGoalBtn" class="secondary" disabled>
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M10 9V5l-7 7 7 7v-4h4a7 7 0 0 0 0-14h-3v2h3a5 5 0 0 1 0 10z"/></svg>
+                </span>
+                <span class="btn-label">Undo</span>
+              </button>
+              <button id="clearGoalsBtn" class="danger" disabled>
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M16 9v10H8V9zm-1.5-6h-5l-1 1H5v2h14V4h-3.5z"/></svg>
+                </span>
+                <span class="btn-label">Clear</span>
+              </button>
+              <button id="cancelGoalBtn" class="danger">
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M7 3h10l4 4v10l-4 4H7l-4-4V7zm4.71 5.29L10.29 9.7 12.59 12l-2.3 2.29 1.42 1.42L14 13.41l2.29 2.3 1.42-1.42L15.41 12l2.3-2.29-1.42-1.42L14 10.59z"/></svg>
+                </span>
+                <span class="btn-label">Cancel</span>
+              </button>
+            </div>
+            <div class="row">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                <input id="goalLoop" type="checkbox" style="width:auto;" /> Loop route
+              </label>
+            </div>
+            <div class="row">
+              <button id="manualModeBtn" class="secondary">Manual: OFF</button>
+              <button id="snapshotBtn" class="secondary">
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M9 4 7.17 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.17L15 4zm3 14a5 5 0 1 1 5-5 5 5 0 0 1-5 5z"/></svg>
+                </span>
+                <span class="btn-label">Snapshot</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section sliders">
+          <h2>Sliders</h2>
+          <div class="stack" style="gap:4px;">
+            <label style="font-size:13px;">
+              Linear speed max: <span id="manualLinearValue">1.20</span> m/s
+            </label>
+            <input id="manualLinearSlider" type="range" min="1.0" max="4.0" step="0.01" value="1.20" />
+            <label style="font-size:13px;">
+              Angular speed max: <span id="manualAngularValue">0.40</span> rad/s
+            </label>
+            <input id="manualAngularSlider" type="range" min="0.1" max="0.4" step="0.01" value="0.40" />
+          </div>
+        </section>
+
+        <section class="panel-section camera">
+          <h2>Camera PTZ</h2>
+          <div class="stack">
+            <div class="ptz-grid">
+              <button id="ptz_angle_135" class="secondary" type="button">⇖</button>
+              <button id="ptz_angle_90" class="secondary" type="button">⇑</button>
+              <button id="ptz_angle_45" class="secondary" type="button">⇗</button>
+
+              <button id="ptz_angle_180" class="secondary" type="button">⇐</button>
+              <button id="ptz_center_zoom" class="secondary" type="button">🔍</button>
+              <button id="ptz_angle_0" class="secondary" type="button">⇒</button>
+
+              <button id="ptz_angle_m135" class="secondary" type="button">⇙</button>
+              <button id="ptz_angle_m90" class="secondary" type="button">⇓</button>
+              <button id="ptz_angle_m45" class="secondary" type="button">⇘</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section telemetry">
+          <h2>Telemetry</h2>
+          <div class="status-board">
+            <div id="goalStatus" class="status">No active goal</div>
+            <div id="waypointStatus" class="status">Waypoints: 0</div>
+            <div id="cmdVelSafeStatus" class="status">cmd_vel_safe: n/a</div>
+            <div id="manualStatus" class="status">Manual: OFF · keys=- · vx_cmd=0.00 · wz_cmd=0.00</div>
+            <div id="cameraStatus" class="status">camera: n/a</div>
+          </div>
+        </section>
       </div>
-
-      <h2>Camera PTZ</h2>
-      <div class="stack">
-        <div class="ptz-grid">
-          <button id="ptz_angle_135" class="secondary" type="button">⇖</button>
-          <button id="ptz_angle_90" class="secondary" type="button">⇑</button>
-          <button id="ptz_angle_45" class="secondary" type="button">⇗</button>
-
-          <button id="ptz_angle_180" class="secondary" type="button">⇐</button>
-          <button id="ptz_center_zoom" class="secondary" type="button">🔍</button>
-          <button id="ptz_angle_0" class="secondary" type="button">⇒</button>
-
-          <button id="ptz_angle_m135" class="secondary" type="button">⇙</button>
-          <button id="ptz_angle_m90" class="secondary" type="button">⇓</button>
-          <button id="ptz_angle_m45" class="secondary" type="button">⇘</button>
-        </div>
-      </div>
-
     </div>
     <div class="visual-col">
-      <div class="status-board">
-        <div id="status" class="status">Disconnected</div>
-        <div id="goalStatus" class="status">No active goal</div>
-        <div id="waypointStatus" class="status">Waypoints: 0</div>
-        <div id="cmdVelSafeStatus" class="status">cmd_vel_safe: n/a</div>
-        <div id="manualStatus" class="status">Manual: OFF · keys=- · vx_cmd=0.00 · wz_cmd=0.00</div>
-        <div id="cameraStatus" class="status">camera: n/a</div>
-      </div>
       <div id="viewStage" class="mode-camera-main">
         <div id="cameraPane" class="view-pane">
           <iframe id="cameraFrame" title="Camera feed" loading="lazy"></iframe>
@@ -887,7 +1059,7 @@
       const manual = state.manualControl || { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0 };
       const enabled = manual.enabled === true;
       const btn = document.getElementById('manualModeBtn');
-      btn.textContent = enabled ? 'Manual Control: ON' : 'Manual Control: OFF';
+      btn.textContent = enabled ? 'Manual: ON' : 'Manual: OFF';
       btn.classList.toggle('manual-on', enabled);
 
       const vx = Number(state.manualCmd.linearX || 0).toFixed(2);

@@ -1,14 +1,18 @@
 import asyncio
 import base64
 import json
+import math
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import rclpy
 import websockets
+from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix
@@ -27,6 +31,7 @@ from interfaces.srv import (
     SetNavGoalLL,
     SetZonesGeoJson,
 )
+from .waypoints_file_utils import load_waypoints_yaml_file, save_waypoints_yaml_file
 
 
 class WebZoneServerNode(Node):
@@ -38,11 +43,13 @@ class WebZoneServerNode(Node):
         self.declare_parameter("ws_port", 8766)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("gps_topic", "/gps/fix")
+        self.declare_parameter("odom_topic", "/odometry/local")
         self.declare_parameter("gps_broadcast_hz", 1.0)
         self.declare_parameter("request_timeout_s", 5.0)
         self.declare_parameter("snapshot_request_timeout_s", 2.0)
         self.declare_parameter("set_zones_timeout_s", 12.0)
         self.declare_parameter("set_goal_timeout_s", 12.0)
+        self.declare_parameter("waypoints_file", "")
 
         self.declare_parameter("zones_set_geojson_service", "/zones_manager/set_geojson")
         self.declare_parameter("zones_get_state_service", "/zones_manager/get_state")
@@ -65,6 +72,7 @@ class WebZoneServerNode(Node):
         self.ws_port = int(self.get_parameter("ws_port").value)
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.gps_topic = str(self.get_parameter("gps_topic").value)
+        self.odom_topic = str(self.get_parameter("odom_topic").value)
         self.gps_broadcast_hz = float(self.get_parameter("gps_broadcast_hz").value)
         self.request_timeout_s = max(0.5, float(self.get_parameter("request_timeout_s").value))
         self.snapshot_request_timeout_s = max(
@@ -76,6 +84,8 @@ class WebZoneServerNode(Node):
         self.set_goal_timeout_s = max(
             self.request_timeout_s, float(self.get_parameter("set_goal_timeout_s").value)
         )
+        configured_waypoints_file = str(self.get_parameter("waypoints_file").value)
+        self.waypoints_file = self._resolve_waypoints_file(configured_waypoints_file)
 
         self.zones_set_geojson_service = str(
             self.get_parameter("zones_set_geojson_service").value
@@ -108,6 +118,7 @@ class WebZoneServerNode(Node):
         self._ws_clients: Set[Any] = set()
 
         self._last_robot_pose: Optional[Dict[str, float]] = None
+        self._last_robot_heading_deg: Optional[float] = None
         self._last_gps_broadcast_monotonic: Optional[float] = None
 
         self._zones: List[Dict[str, Any]] = []
@@ -138,6 +149,9 @@ class WebZoneServerNode(Node):
 
         self._gps_sub = self.create_subscription(
             NavSatFix, self.gps_topic, self._on_gps_fix, 10
+        )
+        self._odom_sub = self.create_subscription(
+            Odometry, self.odom_topic, self._on_odometry, 10
         )
         self._nav_telemetry_sub = self.create_subscription(
             NavTelemetry, self.nav_telemetry_topic, self._on_nav_telemetry, 10
@@ -174,8 +188,9 @@ class WebZoneServerNode(Node):
             f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service}, "
             f"camera_pan={self.camera_pan_service}, camera_zoom_toggle={self.camera_zoom_toggle_service}, "
             f"camera_status={self.camera_status_service}, "
-            f"teleop_topic={self.teleop_cmd_topic})"
+            f"teleop_topic={self.teleop_cmd_topic}, odom_topic={self.odom_topic})"
         )
+        self.get_logger().info(f"Waypoints file path: {self.waypoints_file}")
 
     def add_client(self, ws: Any) -> None:
         with self._lock:
@@ -237,7 +252,13 @@ class WebZoneServerNode(Node):
         if not np.isfinite(msg.latitude) or not np.isfinite(msg.longitude):
             return
 
-        pose = {"lat": float(msg.latitude), "lon": float(msg.longitude)}
+        with self._lock:
+            heading_deg = self._last_robot_heading_deg
+        pose = self._build_robot_pose(
+            lat=float(msg.latitude),
+            lon=float(msg.longitude),
+            heading_deg=heading_deg,
+        )
         with self._lock:
             self._last_robot_pose = pose
             last_sent = self._last_gps_broadcast_monotonic
@@ -253,7 +274,54 @@ class WebZoneServerNode(Node):
         payload = {"op": "robot_pose", "pose": pose}
         asyncio.run_coroutine_threadsafe(self._broadcast(payload), self._loop)
 
+    def _yaw_deg_from_quaternion(
+        self, x: float, y: float, z: float, w: float
+    ) -> Optional[float]:
+        if (
+            (not np.isfinite(x))
+            or (not np.isfinite(y))
+            or (not np.isfinite(z))
+            or (not np.isfinite(w))
+        ):
+            return None
+        norm = math.sqrt((x * x) + (y * y) + (z * z) + (w * w))
+        if norm < 1.0e-9:
+            return None
+        x /= norm
+        y /= norm
+        z /= norm
+        w /= norm
+        siny_cosp = 2.0 * ((w * z) + (x * y))
+        cosy_cosp = 1.0 - (2.0 * ((y * y) + (z * z)))
+        yaw_deg = math.degrees(math.atan2(siny_cosp, cosy_cosp))
+        while yaw_deg <= -180.0:
+            yaw_deg += 360.0
+        while yaw_deg > 180.0:
+            yaw_deg -= 360.0
+        return float(yaw_deg)
+
+    def _build_robot_pose(
+        self, lat: float, lon: float, heading_deg: Optional[float] = None
+    ) -> Dict[str, float]:
+        pose = {"lat": float(lat), "lon": float(lon)}
+        if heading_deg is not None and np.isfinite(heading_deg):
+            pose["heading_deg"] = float(heading_deg)
+        return pose
+
+    def _on_odometry(self, msg: Odometry) -> None:
+        q = msg.pose.pose.orientation
+        heading_deg = self._yaw_deg_from_quaternion(
+            float(q.x), float(q.y), float(q.z), float(q.w)
+        )
+        if heading_deg is None:
+            return
+        with self._lock:
+            self._last_robot_heading_deg = float(heading_deg)
+            if self._last_robot_pose is not None:
+                self._last_robot_pose["heading_deg"] = float(heading_deg)
+
     def _on_nav_telemetry(self, msg: NavTelemetry) -> None:
+        robot_pose_payload = None
         with self._lock:
             self._cmd_vel_safe = {
                 "available": bool(msg.cmd_vel_available),
@@ -274,14 +342,21 @@ class WebZoneServerNode(Node):
             }
 
             if np.isfinite(msg.robot_lat) and np.isfinite(msg.robot_lon):
-                self._last_robot_pose = {
-                    "lat": float(msg.robot_lat),
-                    "lon": float(msg.robot_lon),
-                }
+                self._last_robot_pose = self._build_robot_pose(
+                    lat=float(msg.robot_lat),
+                    lon=float(msg.robot_lon),
+                    heading_deg=self._last_robot_heading_deg,
+                )
+                robot_pose_payload = dict(self._last_robot_pose)
 
         asyncio.run_coroutine_threadsafe(
             self._broadcast(self._build_nav_telemetry_payload()), self._loop
         )
+        if robot_pose_payload is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._broadcast({"op": "robot_pose", "pose": robot_pose_payload}),
+                self._loop,
+            )
 
     def _wait_for_future(self, future: Any, timeout_s: float) -> Optional[Any]:
         start = time.monotonic()
@@ -308,6 +383,31 @@ class WebZoneServerNode(Node):
                 f"Service timeout: {service_name} (request={request_name}, timeout_s={timeout_s:.2f})"
             )
         return result
+
+    def _resolve_waypoints_file(self, configured_path: str) -> Path:
+        if configured_path:
+            return Path(configured_path)
+
+        config_dir = self._resolve_navegacion_config_dir()
+        return config_dir / "saved_waypoints.yaml"
+
+    def _resolve_navegacion_config_dir(self) -> Path:
+        try:
+            pkg_dir = Path(get_package_share_directory("navegacion_gps"))
+            default_dir = pkg_dir / "config"
+            try:
+                workspace_root = pkg_dir.parents[3]
+                source_dir = workspace_root / "src" / "navegacion_gps" / "config"
+                if source_dir.exists():
+                    return source_dir
+            except Exception:
+                pass
+            return default_dir
+        except Exception:
+            pass
+
+        fallback = Path(__file__).resolve().parents[3] / "src" / "navegacion_gps" / "config"
+        return fallback
 
     def _geojson_string_to_zones(self, geojson_text: str) -> List[Dict[str, Any]]:
         try:
@@ -438,10 +538,11 @@ class WebZoneServerNode(Node):
                 "last_cmd_age_s": None,
             }
             if np.isfinite(response.robot_lat) and np.isfinite(response.robot_lon):
-                self._last_robot_pose = {
-                    "lat": float(response.robot_lat),
-                    "lon": float(response.robot_lon),
-                }
+                self._last_robot_pose = self._build_robot_pose(
+                    lat=float(response.robot_lat),
+                    lon=float(response.robot_lon),
+                    heading_deg=self._last_robot_heading_deg,
+                )
 
     def get_zones_state(self) -> Tuple[bool, str]:
         req = GetZonesState.Request()
@@ -530,6 +631,22 @@ class WebZoneServerNode(Node):
         else:
             self.get_logger().info("set_nav_goals ok")
         return bool(res.ok), str(res.error), len(waypoints), bool(loop)
+
+    def save_waypoints_file(self, waypoints: List[Dict[str, float]]) -> Tuple[bool, str, int]:
+        ok, err, count = save_waypoints_yaml_file(self.waypoints_file, waypoints)
+        if not ok:
+            self.get_logger().warning(f"save_waypoints_file failed: {err}")
+            return False, err, 0
+        self.get_logger().info(f"save_waypoints_file ok (count={count})")
+        return True, "", int(count)
+
+    def load_waypoints_file(self) -> Tuple[bool, str, List[Dict[str, float]]]:
+        ok, err, waypoints = load_waypoints_yaml_file(self.waypoints_file)
+        if not ok:
+            self.get_logger().warning(f"load_waypoints_file failed: {err}")
+            return False, err, []
+        self.get_logger().info(f"load_waypoints_file ok (count={len(waypoints)})")
+        return True, "", waypoints
 
     def cancel_nav_goal(self) -> Tuple[bool, str]:
         req = CancelNavGoal.Request()
@@ -825,6 +942,50 @@ class WebSocketApi:
             )
             if ok:
                 await self.node._broadcast(self.node.snapshot_state())
+            return
+
+        if op == "save_waypoints_file":
+            waypoints, _, parse_err = self._parse_waypoints_from_message(msg)
+            if waypoints is None:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "op": "ack",
+                            "ok": False,
+                            "request": "save_waypoints_file",
+                            "error": parse_err,
+                        }
+                    )
+                )
+                return
+            ok, err, count = await asyncio.to_thread(self.node.save_waypoints_file, waypoints)
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "ack",
+                        "ok": ok,
+                        "request": "save_waypoints_file",
+                        "error": None if ok else err,
+                        "waypoint_count": int(count),
+                    }
+                )
+            )
+            return
+
+        if op == "load_waypoints_file":
+            ok, err, waypoints = await asyncio.to_thread(self.node.load_waypoints_file)
+            await ws.send(
+                json.dumps(
+                    {
+                        "op": "ack",
+                        "ok": ok,
+                        "request": "load_waypoints_file",
+                        "error": None if ok else err,
+                        "waypoint_count": int(len(waypoints)),
+                        "waypoints": list(waypoints) if ok else [],
+                    }
+                )
+            )
             return
 
         if op == "set_goal_ll":
