@@ -116,6 +116,7 @@ class WebZoneServerNode(Node):
 
         self._lock = threading.Lock()
         self._ws_clients: Set[Any] = set()
+        self._ws_send_locks: Dict[Any, asyncio.Lock] = {}
 
         self._last_robot_pose: Optional[Dict[str, float]] = None
         self._last_robot_heading_deg: Optional[float] = None
@@ -195,14 +196,28 @@ class WebZoneServerNode(Node):
     def add_client(self, ws: Any) -> None:
         with self._lock:
             self._ws_clients.add(ws)
+            self._ws_send_locks[ws] = asyncio.Lock()
             count = len(self._ws_clients)
         self.get_logger().info(f"WS client connected (clients={count})")
 
     def remove_client(self, ws: Any) -> None:
         with self._lock:
             self._ws_clients.discard(ws)
+            self._ws_send_locks.pop(ws, None)
             count = len(self._ws_clients)
         self.get_logger().info(f"WS client disconnected (clients={count})")
+
+    async def send_ws_text(self, ws: Any, text: str) -> bool:
+        with self._lock:
+            lock = self._ws_send_locks.get(ws)
+        if lock is None:
+            return False
+        async with lock:
+            await ws.send(text)
+        return True
+
+    async def send_ws_json(self, ws: Any, payload: Dict[str, Any]) -> bool:
+        return await self.send_ws_text(ws, json.dumps(payload))
 
     def snapshot_state(self) -> Dict[str, Any]:
         with self._lock:
@@ -240,13 +255,16 @@ class WebZoneServerNode(Node):
         failed = []
         for ws in clients:
             try:
-                await ws.send(text)
+                sent = await self.send_ws_text(ws, text)
+                if not sent:
+                    failed.append(ws)
             except Exception:
                 failed.append(ws)
         if failed:
             with self._lock:
                 for ws in failed:
                     self._ws_clients.discard(ws)
+                    self._ws_send_locks.pop(ws, None)
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
         if not np.isfinite(msg.latitude) or not np.isfinite(msg.longitude):
@@ -860,68 +878,125 @@ class WebSocketApi:
 
         return waypoints, loop, ""
 
+    @staticmethod
+    def _extract_client_req_id(msg: Dict[str, Any]) -> Optional[str]:
+        req_id = msg.get("client_req_id")
+        if req_id is None:
+            return None
+        if isinstance(req_id, (str, int, float, bool)):
+            return str(req_id)
+        return None
+
+    def _build_ack_payload(
+        self,
+        request: str,
+        ok: bool,
+        error: Optional[str],
+        client_req_id: Optional[str],
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "op": "ack",
+            "ok": bool(ok),
+            "request": str(request),
+            "error": None if ok else str(error or "unknown error"),
+        }
+        if client_req_id is not None:
+            payload["client_req_id"] = client_req_id
+        if extra:
+            payload.update(extra)
+        return payload
+
+    async def _send_json(self, ws: Any, payload: Dict[str, Any]) -> None:
+        await self.node.send_ws_json(ws, payload)
+
+    async def _send_ack(
+        self,
+        ws: Any,
+        request: str,
+        ok: bool,
+        error: Optional[str] = None,
+        *,
+        client_req_id: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        await self._send_json(
+            ws,
+            self._build_ack_payload(
+                request=request,
+                ok=ok,
+                error=error,
+                client_req_id=client_req_id,
+                extra=extra,
+            ),
+        )
+
     async def handle(self, ws: Any, path: Optional[str] = None) -> None:
         _ = path
+        pending_tasks: Set[asyncio.Task[Any]] = set()
         self.node.add_client(ws)
         try:
-            await ws.send(json.dumps(self.node.snapshot_state()))
+            await self._send_json(ws, self.node.snapshot_state())
             async for raw in ws:
-                await self._handle_message(ws, raw)
+                task = asyncio.create_task(self._handle_message_safe(ws, raw))
+                pending_tasks.add(task)
+                task.add_done_callback(lambda done: pending_tasks.discard(done))
         finally:
+            for task in list(pending_tasks):
+                task.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
             self.node.remove_client(ws)
+
+    async def _handle_message_safe(self, ws: Any, raw: str) -> None:
+        try:
+            await self._handle_message(ws, raw)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.node.get_logger().error(f"WS request handling failed: {exc}")
 
     async def _handle_message(self, ws: Any, raw: str) -> None:
         try:
             msg = json.loads(raw)
         except json.JSONDecodeError:
             self.node.get_logger().warning("Invalid WS JSON payload received")
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": False,
-                        "request": "invalid_json",
-                        "error": "invalid json",
-                    }
-                )
-            )
+            await self._send_ack(ws, "invalid_json", False, "invalid json")
             return
 
+        client_req_id = self._extract_client_req_id(msg)
         op = msg.get("op")
         if op != "set_manual_cmd":
             self.node.get_logger().info(f"WS op received: {op}")
         if op == "get_state":
-            await ws.send(json.dumps(self.node.snapshot_state()))
+            payload = self.node.snapshot_state()
+            if client_req_id is not None:
+                payload["client_req_id"] = client_req_id
+            await self._send_json(ws, payload)
             return
 
         if op == "set_zones_geojson":
             geojson_payload = msg.get("geojson")
             if geojson_payload is None:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "op": "ack",
-                            "ok": False,
-                            "request": "set_zones_geojson",
-                            "error": "geojson field is required",
-                            "published": False,
-                        }
-                    )
+                await self._send_ack(
+                    ws,
+                    "set_zones_geojson",
+                    False,
+                    "geojson field is required",
+                    client_req_id=client_req_id,
+                    extra={"published": False},
                 )
                 return
             ok, err, published = await asyncio.to_thread(
                 self.node.set_zones_geojson, geojson_payload
             )
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "set_zones_geojson",
-                        "error": None if ok else err,
-                        "published": bool(published),
-                    }
-                )
+            await self._send_ack(
+                ws,
+                "set_zones_geojson",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={"published": bool(published)},
             )
             if ok:
                 await self.node._broadcast(self.node.snapshot_state())
@@ -929,16 +1004,13 @@ class WebSocketApi:
 
         if op == "load_zones_file":
             ok, err = await asyncio.to_thread(self.node.reload_zones_from_disk)
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "load_zones_file",
-                        "error": None if ok else err,
-                        "published": bool(ok),
-                    }
-                )
+            await self._send_ack(
+                ws,
+                "load_zones_file",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={"published": bool(ok)},
             )
             if ok:
                 await self.node._broadcast(self.node.snapshot_state())
@@ -947,134 +1019,103 @@ class WebSocketApi:
         if op == "save_waypoints_file":
             waypoints, _, parse_err = self._parse_waypoints_from_message(msg)
             if waypoints is None:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "op": "ack",
-                            "ok": False,
-                            "request": "save_waypoints_file",
-                            "error": parse_err,
-                        }
-                    )
+                await self._send_ack(
+                    ws,
+                    "save_waypoints_file",
+                    False,
+                    parse_err,
+                    client_req_id=client_req_id,
                 )
                 return
             ok, err, count = await asyncio.to_thread(self.node.save_waypoints_file, waypoints)
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "save_waypoints_file",
-                        "error": None if ok else err,
-                        "waypoint_count": int(count),
-                    }
-                )
+            await self._send_ack(
+                ws,
+                "save_waypoints_file",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={"waypoint_count": int(count)},
             )
             return
 
         if op == "load_waypoints_file":
             ok, err, waypoints = await asyncio.to_thread(self.node.load_waypoints_file)
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "load_waypoints_file",
-                        "error": None if ok else err,
-                        "waypoint_count": int(len(waypoints)),
-                        "waypoints": list(waypoints) if ok else [],
-                    }
-                )
+            await self._send_ack(
+                ws,
+                "load_waypoints_file",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={
+                    "waypoint_count": int(len(waypoints)),
+                    "waypoints": list(waypoints) if ok else [],
+                },
             )
             return
 
         if op == "set_goal_ll":
             waypoints, loop_enabled, parse_err = self._parse_waypoints_from_message(msg)
             if waypoints is None:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "op": "ack",
-                            "ok": False,
-                            "request": "set_goal_ll",
-                            "error": parse_err,
-                        }
-                    )
+                await self._send_ack(
+                    ws,
+                    "set_goal_ll",
+                    False,
+                    parse_err,
+                    client_req_id=client_req_id,
                 )
                 return
             ok, err, waypoint_count, loop_used = await asyncio.to_thread(
                 self.node.set_nav_goals, waypoints, loop_enabled
             )
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "set_goal_ll",
-                        "error": None if ok else err,
-                        "waypoint_count": int(waypoint_count),
-                        "loop": bool(loop_used),
-                    }
-                )
+            await self._send_ack(
+                ws,
+                "set_goal_ll",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={
+                    "waypoint_count": int(waypoint_count),
+                    "loop": bool(loop_used),
+                },
             )
             return
 
         if op == "cancel_goal":
             ok, err = await asyncio.to_thread(self.node.cancel_nav_goal)
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "cancel_goal",
-                        "error": None if ok else err,
-                    }
-                )
+            await self._send_ack(
+                ws, "cancel_goal", ok, err, client_req_id=client_req_id
             )
             return
 
         if op == "brake":
             ok, err = await asyncio.to_thread(self.node.brake_nav)
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "brake",
-                        "error": None if ok else err,
-                    }
-                )
+            await self._send_ack(
+                ws, "brake", ok, err, client_req_id=client_req_id
             )
             return
 
         if op == "set_manual_mode":
             enabled_raw = msg.get("enabled")
             if not isinstance(enabled_raw, bool):
-                await ws.send(
-                    json.dumps(
-                        {
-                            "op": "ack",
-                            "ok": False,
-                            "request": "set_manual_mode",
-                            "error": "enabled must be boolean",
-                        }
-                    )
+                await self._send_ack(
+                    ws,
+                    "set_manual_mode",
+                    False,
+                    "enabled must be boolean",
+                    client_req_id=client_req_id,
                 )
                 return
             ok, err, enabled_after = await asyncio.to_thread(
                 self.node.set_manual_mode,
                 enabled_raw,
             )
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "set_manual_mode",
-                        "enabled": enabled_after,
-                        "error": None if ok else err,
-                    }
-                )
+            await self._send_ack(
+                ws,
+                "set_manual_mode",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={"enabled": bool(enabled_after)},
             )
             if ok:
                 await self.node._broadcast(self.node.snapshot_state())
@@ -1085,15 +1126,12 @@ class WebSocketApi:
                 linear_x = float(msg["linear_x"])
                 angular_z = float(msg["angular_z"])
             except (KeyError, ValueError, TypeError) as exc:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "op": "ack",
-                            "ok": False,
-                            "request": "set_manual_cmd",
-                            "error": f"invalid parameters: {exc}",
-                        }
-                    )
+                await self._send_ack(
+                    ws,
+                    "set_manual_cmd",
+                    False,
+                    f"invalid parameters: {exc}",
+                    client_req_id=client_req_id,
                 )
                 return
             ok, err = await asyncio.to_thread(
@@ -1101,31 +1139,31 @@ class WebSocketApi:
                 linear_x,
                 angular_z,
             )
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "set_manual_cmd",
-                        "error": None if ok else err,
-                    }
-                )
+            await self._send_ack(
+                ws,
+                "set_manual_cmd",
+                ok,
+                err,
+                client_req_id=client_req_id,
             )
             return
 
         if op == "get_nav_snapshot":
             ok, err, payload = await asyncio.to_thread(self.node.get_nav_snapshot)
+            if client_req_id is not None:
+                payload = dict(payload)
+                payload["client_req_id"] = client_req_id
             if ok:
-                await ws.send(json.dumps(payload))
+                await self._send_json(ws, payload)
                 return
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "nav_snapshot",
-                        "ok": False,
-                        "error": err or "snapshot request failed",
-                    }
-                )
+            await self._send_json(
+                ws,
+                {
+                    "op": "nav_snapshot",
+                    "ok": False,
+                    "error": err or "snapshot request failed",
+                    "client_req_id": client_req_id,
+                },
             )
             return
 
@@ -1134,71 +1172,55 @@ class WebSocketApi:
             try:
                 angle = float(angle_raw)
             except (ValueError, TypeError):
-                await ws.send(
-                    json.dumps(
-                        {
-                            "op": "ack",
-                            "ok": False,
-                            "request": "camera_pan",
-                            "error": "angle must be numeric",
-                        }
-                    )
+                await self._send_ack(
+                    ws,
+                    "camera_pan",
+                    False,
+                    "angle must be numeric",
+                    client_req_id=client_req_id,
                 )
                 return
             if not np.isfinite(angle):
-                await ws.send(
-                    json.dumps(
-                        {
-                            "op": "ack",
-                            "ok": False,
-                            "request": "camera_pan",
-                            "error": "angle must be finite",
-                        }
-                    )
+                await self._send_ack(
+                    ws,
+                    "camera_pan",
+                    False,
+                    "angle must be finite",
+                    client_req_id=client_req_id,
                 )
                 return
             ok, err, _ = await asyncio.to_thread(self.node.camera_pan, angle)
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "camera_pan",
-                        "error": None if ok else err,
-                    }
-                )
+            await self._send_ack(
+                ws, "camera_pan", ok, err, client_req_id=client_req_id
             )
             return
 
         if op == "camera_zoom_toggle":
             ok, err = await asyncio.to_thread(self.node.camera_zoom_toggle)
-            await ws.send(
-                json.dumps(
-                    {
-                        "op": "ack",
-                        "ok": ok,
-                        "request": "camera_zoom_toggle",
-                        "error": None if ok else err,
-                    }
-                )
+            await self._send_ack(
+                ws,
+                "camera_zoom_toggle",
+                ok,
+                err,
+                client_req_id=client_req_id,
             )
             return
 
         if op == "get_camera_status":
             _, _, payload = await asyncio.to_thread(self.node.get_camera_status)
-            await ws.send(json.dumps(payload))
+            if client_req_id is not None:
+                payload = dict(payload)
+                payload["client_req_id"] = client_req_id
+            await self._send_json(ws, payload)
             return
 
-        await ws.send(
-            json.dumps(
-                {
-                    "op": "ack",
-                    "ok": False,
-                    "request": str(op),
-                    "error": "unknown op",
-                    "published": False,
-                }
-            )
+        await self._send_ack(
+            ws,
+            str(op),
+            False,
+            "unknown op",
+            client_req_id=client_req_id,
+            extra={"published": False},
         )
         self.node.get_logger().warning(f"Unknown WS op received: {op}")
 

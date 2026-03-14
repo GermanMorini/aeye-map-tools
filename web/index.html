@@ -354,6 +354,44 @@
       border-bottom-color: #f59e0b;
       opacity: 0.9;
     }
+    .robot-icon {
+      width: 40px;
+      height: 40px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: 50% 50%;
+    }
+    .robot-icon .robot-arrow {
+      position: absolute;
+      top: 1px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 16px;
+      height: 32px;
+      background: linear-gradient(180deg, #55cbff 0%, #0ea5e9 42%, #0284c7 100%);
+      clip-path: polygon(50% 0%, 100% 66%, 66% 62%, 50% 100%, 34% 62%, 0% 66%);
+      filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.75));
+    }
+    .robot-icon .robot-core {
+      position: absolute;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #ffffff;
+      border: 1px solid #0b5a87;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8);
+    }
+    .robot-icon.no-heading .robot-arrow {
+      display: none;
+    }
+    .robot-icon.no-heading .robot-core {
+      width: 9px;
+      height: 9px;
+      border-width: 3px;
+      background: #38bdf8;
+    }
     .ptz-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -465,7 +503,10 @@
             <div id="status" class="status">Disconnected</div>
           </div>
           <div class="stack">
-            <input id="wsUrl" value="ws://100.111.4.7:8766" />
+            <div class="row">
+              <input id="wsHost" value="100.111.4.7" placeholder="Host" />
+              <input id="wsPort" value="8766" placeholder="Port" />
+            </div>
             <div class="row">
               <button id="connectBtn">
                 <span class="btn-icon" aria-hidden="true">
@@ -559,8 +600,22 @@
             </div>
             <div class="row">
               <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
-                <input id="goalLoop" type="checkbox" style="width:auto;" /> Loop route
+                <input id="goalLoop" type="checkbox" checked style="width:auto;" /> Loop route
               </label>
+            </div>
+            <div class="row">
+              <button id="saveWaypointsBtn" class="secondary">
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zM7 5h8v4H7zm12 14H5V9h14z"/></svg>
+                </span>
+                <span class="btn-label">Save</span>
+              </button>
+              <button id="loadWaypointsBtn" class="secondary">
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-7 11-3-3h2V9h2v5h2z"/></svg>
+                </span>
+                <span class="btn-label">Load</span>
+              </button>
             </div>
             <div class="row">
               <button id="manualModeBtn" class="secondary">Manual: OFF</button>
@@ -706,10 +761,60 @@
       manualControl: { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0, last_cmd_age_s: null },
       manualKeys: { w: false, a: false, s: false, d: false },
       manualCmd: { linearX: 0.0, angularZ: 0.0 },
-      manualLoopTimer: null
+      manualLoopTimer: null,
+      nextClientReqId: 1,
+      requestRegistry: new Map(),
+      pendingByOp: new Map(),
+      pendingIdsByOp: new Map(),
+      buttonBaseLabels: new Map()
     };
 
     const MANUAL_LOOP_HZ = 20.0;
+    const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
+    const REQUEST_TIMEOUT_OVERRIDES_MS = {
+      set_goal_ll: 15000
+    };
+    const TRACKED_OP_UI = {
+      set_zones_geojson: {
+        buttons: {
+          saveBtn: { pending: 'Saving' },
+          pushBtn: { pending: 'Pushing' }
+        }
+      },
+      load_zones_file: {
+        buttons: {
+          loadBtn: { pending: 'Loading' }
+        }
+      },
+      set_goal_ll: {
+        buttons: {
+          sendGoalsBtn: { pending: 'Sending' }
+        }
+      },
+      save_waypoints_file: {
+        buttons: {
+          saveWaypointsBtn: { pending: 'Saving' }
+        }
+      },
+      load_waypoints_file: {
+        buttons: {
+          loadWaypointsBtn: { pending: 'Loading' }
+        }
+      },
+      cancel_goal: {
+        buttons: {
+          cancelGoalBtn: { pending: 'Cancelling' }
+        }
+      },
+      get_nav_snapshot: {
+        buttons: {
+          snapshotBtn: { pending: 'Snapshotting' }
+        }
+      },
+      set_manual_mode: {
+        buttons: {}
+      }
+    };
 
     function setStatus(text, ok = null) {
       const s = document.getElementById('status');
@@ -717,6 +822,129 @@
       s.className = 'status';
       if (ok === true) s.classList.add('good');
       if (ok === false) s.classList.add('bad');
+    }
+
+    function getButtonLabelText(buttonId) {
+      const btn = document.getElementById(buttonId);
+      if (!btn) return '';
+      const labelEl = btn.querySelector('.btn-label');
+      if (labelEl) return String(labelEl.textContent || '').trim();
+      return String(btn.textContent || '').trim();
+    }
+
+    function setButtonLabelText(buttonId, text) {
+      const btn = document.getElementById(buttonId);
+      if (!btn) return;
+      const labelEl = btn.querySelector('.btn-label');
+      if (labelEl) {
+        labelEl.textContent = text;
+      } else {
+        btn.textContent = text;
+      }
+    }
+
+    function initializeTrackedButtonsUi() {
+      Object.values(TRACKED_OP_UI).forEach((cfg) => {
+        const buttons = (cfg && cfg.buttons) ? cfg.buttons : {};
+        Object.keys(buttons).forEach((buttonId) => {
+          if (!state.buttonBaseLabels.has(buttonId)) {
+            state.buttonBaseLabels.set(buttonId, getButtonLabelText(buttonId));
+          }
+        });
+      });
+    }
+
+    function getOpTimeoutMs(op) {
+      if (Object.prototype.hasOwnProperty.call(REQUEST_TIMEOUT_OVERRIDES_MS, op)) {
+        return Number(REQUEST_TIMEOUT_OVERRIDES_MS[op]);
+      }
+      return DEFAULT_REQUEST_TIMEOUT_MS;
+    }
+
+    function refreshTrackedButtonsForOp(op) {
+      const cfg = TRACKED_OP_UI[op];
+      if (!cfg || !cfg.buttons) return;
+      const count = Number(state.pendingByOp.get(op) || 0);
+      Object.entries(cfg.buttons).forEach(([buttonId, buttonCfg]) => {
+        const base = state.buttonBaseLabels.get(buttonId) || getButtonLabelText(buttonId);
+        if (!state.buttonBaseLabels.has(buttonId) && base) {
+          state.buttonBaseLabels.set(buttonId, base);
+        }
+        let nextLabel = base;
+        const pendingText = String(buttonCfg.pending || '');
+        if (count > 0 && pendingText) {
+          nextLabel = count > 1 ? `${pendingText} (${count})` : pendingText;
+        }
+        setButtonLabelText(buttonId, nextLabel);
+      });
+    }
+
+    function finalizePendingRequestById(clientReqId) {
+      if (clientReqId == null) return false;
+      const key = String(clientReqId);
+      const req = state.requestRegistry.get(key);
+      if (!req) return false;
+      window.clearTimeout(req.timeoutHandle);
+      state.requestRegistry.delete(key);
+
+      const queue = state.pendingIdsByOp.get(req.op);
+      if (queue) {
+        const idx = queue.indexOf(key);
+        if (idx >= 0) queue.splice(idx, 1);
+        if (queue.length === 0) {
+          state.pendingIdsByOp.delete(req.op);
+        }
+      }
+
+      const prevCount = Number(state.pendingByOp.get(req.op) || 0);
+      const nextCount = Math.max(0, prevCount - 1);
+      if (nextCount === 0) {
+        state.pendingByOp.delete(req.op);
+      } else {
+        state.pendingByOp.set(req.op, nextCount);
+      }
+      refreshTrackedButtonsForOp(req.op);
+      return true;
+    }
+
+    function finalizePendingRequestFallbackByOp(op) {
+      const queue = state.pendingIdsByOp.get(op);
+      if (!queue || queue.length === 0) return false;
+      return finalizePendingRequestById(queue[0]);
+    }
+
+    function clearAllPendingRequests(reasonText = null) {
+      const ids = Array.from(state.requestRegistry.keys());
+      ids.forEach((reqId) => {
+        finalizePendingRequestById(reqId);
+      });
+      if (reasonText) {
+        setStatus(reasonText, false);
+      }
+    }
+
+    function registerPendingRequest(op, timeoutMs) {
+      const reqId = `${Date.now()}-${state.nextClientReqId}`;
+      state.nextClientReqId += 1;
+      const timeoutHandle = window.setTimeout(() => {
+        const wasPending = finalizePendingRequestById(reqId);
+        if (!wasPending) return;
+        const timeoutSec = Math.max(1, Math.round(Number(timeoutMs) / 1000));
+        setStatus(`${op} timeout after ${timeoutSec}s`, false);
+        if (op === 'set_manual_mode') {
+          const goalStatusEl = document.getElementById('goalStatus');
+          goalStatusEl.textContent = `Manual mode failed: timeout (${timeoutSec}s)`;
+          goalStatusEl.className = 'status bad';
+        }
+      }, timeoutMs);
+
+      state.requestRegistry.set(reqId, { op, timeoutHandle });
+      const queue = state.pendingIdsByOp.get(op) || [];
+      queue.push(reqId);
+      state.pendingIdsByOp.set(op, queue);
+      state.pendingByOp.set(op, Number(state.pendingByOp.get(op) || 0) + 1);
+      refreshTrackedButtonsForOp(op);
+      return reqId;
     }
 
     function isGpsMainView() {
@@ -752,6 +980,23 @@
           '</div>',
         iconSize: [30, 30],
         iconAnchor: [15, 15]
+      });
+    }
+
+    function buildRobotIcon(headingDeg) {
+      const hasHeading = Number.isFinite(Number(headingDeg));
+      const yaw = hasHeading ? normalizeYawDeg(Number(headingDeg)) : 0.0;
+      const cssRotationDeg = normalizeYawDeg(90.0 - yaw);
+      const classes = hasHeading ? 'robot-icon' : 'robot-icon no-heading';
+      return L.divIcon({
+        className: '',
+        html:
+          `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);">` +
+            '<div class="robot-arrow"></div>' +
+            '<div class="robot-core"></div>' +
+          '</div>',
+        iconSize: [40, 40],
+        iconAnchor: [20, 20]
       });
     }
 
@@ -839,6 +1084,24 @@
       renderGoalWaypoints();
       updateGoalButtonsState();
       updateWaypointStatus();
+    }
+
+    function normalizeIncomingWaypoint(item) {
+      if (!item || typeof item !== 'object') return null;
+      const latRaw = item.lat ?? item.latitude;
+      const lonRaw = item.lon ?? item.longitude;
+      const yawRaw = item.yaw_deg ?? item.yaw ?? 0.0;
+      const lat = Number(latRaw);
+      const lon = Number(lonRaw);
+      const yawDeg = Number(yawRaw);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(yawDeg)) {
+        return null;
+      }
+      return {
+        lat,
+        lon,
+        yaw_deg: normalizeYawDeg(yawDeg)
+      };
     }
 
     function sendCurrentWaypoints() {
@@ -1154,15 +1417,27 @@
       renderManualStatus();
     }
 
-    function send(payload) {
+    function send(payload, options = {}) {
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
         setStatus('WebSocket not connected', false);
-        return;
+        return null;
       }
-      state.ws.send(JSON.stringify(payload));
-      if (!(payload && payload.op === 'set_manual_cmd')) {
-        logEvent(payload, 'tx');
+      const outbound = Object.assign({}, payload || {});
+      const op = String(outbound.op || '');
+      const trackRequest = options.track === true
+        || (options.track !== false && Object.prototype.hasOwnProperty.call(TRACKED_OP_UI, op));
+      let reqId = null;
+      if (trackRequest) {
+        const timeoutMs = Number(options.timeoutMs || getOpTimeoutMs(op));
+        reqId = registerPendingRequest(op, timeoutMs);
+        outbound.client_req_id = reqId;
       }
+
+      state.ws.send(JSON.stringify(outbound));
+      if (!(outbound && outbound.op === 'set_manual_cmd')) {
+        logEvent(outbound, 'tx');
+      }
+      return reqId;
     }
 
     function cameraAngleFromArrowSnapshot(keys) {
@@ -1197,19 +1472,49 @@
       }, 90);
     }
 
+    function buildWsUrlFromFields() {
+      const hostInput = document.getElementById('wsHost');
+      const portInput = document.getElementById('wsPort');
+      const hostRaw = String(hostInput?.value || '').trim();
+      const portRaw = String(portInput?.value || '').trim();
+      if (!hostRaw) {
+        return [null, 'Host is required'];
+      }
+      if (!portRaw) {
+        return [null, 'Port is required'];
+      }
+
+      const port = Number(portRaw);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        return [null, 'Port must be an integer between 1 and 65535'];
+      }
+
+      const hostNoScheme = hostRaw.replace(/^wss?:\/\//i, '').replace(/\/+$/, '');
+      if (!hostNoScheme) {
+        return [null, 'Host is required'];
+      }
+      return [`ws://${hostNoScheme}:${port}`, ''];
+    }
+
     function connectWs() {
-      const url = document.getElementById('wsUrl').value.trim();
+      const [url, urlErr] = buildWsUrlFromFields();
+      if (!url) {
+        setStatus(urlErr || 'Invalid WebSocket host/port', false);
+        return;
+      }
+
       state.ws = new WebSocket(url);
 
       state.ws.onopen = () => {
         state.connected = true;
         setStatus(`Connected to ${url}`, true);
-        send({ op: 'get_state' });
-        send({ op: 'get_camera_status' });
+        send({ op: 'get_state' }, { track: false });
+        send({ op: 'get_camera_status' }, { track: false });
       };
 
       state.ws.onclose = () => {
         state.connected = false;
+        clearAllPendingRequests();
         setStatus('Disconnected', false);
         stopManualLoop();
         resetManualLocalState();
@@ -1247,6 +1552,7 @@
       if (state.ws) {
         state.ws.close();
       }
+      clearAllPendingRequests();
       stopManualLoop();
       resetManualLocalState();
       state.manualControl.enabled = false;
@@ -1255,6 +1561,9 @@
 
     function handleServerMessage(msg) {
       if (msg.op === 'state' && msg.ok === true) {
+        if (msg.client_req_id != null) {
+          finalizePendingRequestById(String(msg.client_req_id));
+        }
         state.frameId = msg.frame_id || 'map';
         const zones = Array.isArray(msg.zones) ? msg.zones : [];
         state.lastZones = zones;
@@ -1285,6 +1594,9 @@
       }
 
       if (msg.op === 'nav_snapshot') {
+        if (msg.client_req_id != null) {
+          finalizePendingRequestById(String(msg.client_req_id));
+        }
         const metaEl = document.getElementById('snapshotMeta');
         if (msg.ok === true && typeof msg.image_b64 === 'string' && msg.image_b64.length > 0) {
           state.lastSnapshot = msg;
@@ -1308,11 +1620,21 @@
       }
 
       if (msg.op === 'camera_status') {
+        if (msg.client_req_id != null) {
+          finalizePendingRequestById(String(msg.client_req_id));
+        }
         updateCameraStatusUi(msg);
         return;
       }
 
       if (msg.op === 'ack') {
+        const requestName = String(msg.request || '');
+        const hasReqId = msg.client_req_id != null;
+        if (hasReqId) {
+          finalizePendingRequestById(String(msg.client_req_id));
+        } else if (requestName) {
+          finalizePendingRequestFallbackByOp(requestName);
+        }
         const goalStatusEl = document.getElementById('goalStatus');
         if (msg.request === 'set_goal_ll') {
           if (msg.ok) {
@@ -1364,9 +1686,28 @@
             goalStatusEl.textContent = `Manual command failed: ${msg.error || 'error'}`;
             goalStatusEl.className = 'status bad';
           }
+        } else if (msg.request === 'save_waypoints_file') {
+          if (msg.ok) {
+            const count = Number(msg.waypoint_count || state.goalWaypoints.length || 0);
+            updateWaypointStatus(`Waypoints saved (${count})`, true);
+          } else {
+            updateWaypointStatus(`Save failed: ${msg.error || 'error'}`, false);
+          }
+        } else if (msg.request === 'load_waypoints_file') {
+          if (msg.ok) {
+            const raw = Array.isArray(msg.waypoints) ? msg.waypoints : [];
+            const waypoints = raw.map(normalizeIncomingWaypoint).filter((wp) => wp !== null);
+            state.goalWaypoints = waypoints;
+            state.goalDraft = null;
+            renderGoalWaypoints();
+            updateGoalButtonsState();
+            updateWaypointStatus(`Waypoints loaded (${waypoints.length})`, true);
+          } else {
+            updateWaypointStatus(`Load failed: ${msg.error || 'error'}`, false);
+          }
         } else if (msg.request === 'camera_pan' || msg.request === 'camera_zoom_toggle') {
           if (msg.ok) {
-            send({ op: 'get_camera_status' });
+            send({ op: 'get_camera_status' }, { track: false });
           } else {
             updateCameraStatusUi({
               ok: false,
@@ -1379,7 +1720,7 @@
           if (msg.ok) {
             const published = msg.published ? 'published' : 'not published';
             setStatus(`${msg.request || 'request'} ok (${published})`, msg.published);
-            send({ op: 'get_state' });
+            send({ op: 'get_state' }, { track: false });
           } else {
             setStatus(`${msg.request || 'request'} failed: ${msg.error || 'error'}`, false);
           }
@@ -1398,16 +1739,17 @@
       }
 
       const latLng = [pose.lat, pose.lon];
+      const headingDeg = (pose && Number.isFinite(Number(pose.heading_deg)))
+        ? Number(pose.heading_deg)
+        : null;
       if (!state.robotMarker) {
-        state.robotMarker = L.circleMarker(latLng, {
-          radius: 8,
-          color: '#0ea5e9',
-          fillColor: '#38bdf8',
-          fillOpacity: 0.9,
-          weight: 2
+        state.robotMarker = L.marker(latLng, {
+          icon: buildRobotIcon(headingDeg),
+          interactive: false
         }).addTo(map);
       } else {
         state.robotMarker.setLatLng(latLng);
+        state.robotMarker.setIcon(buildRobotIcon(headingDeg));
       }
     }
 
@@ -1602,6 +1944,13 @@
     });
 
     document.getElementById('connectBtn').addEventListener('click', connectWs);
+    const connectOnEnter = (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      connectWs();
+    };
+    document.getElementById('wsHost').addEventListener('keydown', connectOnEnter);
+    document.getElementById('wsPort').addEventListener('keydown', connectOnEnter);
     document.getElementById('disconnectBtn').addEventListener('click', disconnectWs);
     document.getElementById('refreshBtn').addEventListener('click', () => send({ op: 'get_state' }));
     document.getElementById('pushBtn').addEventListener('click', pushLayersToServer);
@@ -1626,6 +1975,21 @@
 
     document.getElementById('sendGoalsBtn').addEventListener('click', () => {
       sendCurrentWaypoints();
+    });
+    document.getElementById('saveWaypointsBtn').addEventListener('click', () => {
+      if (state.goalWaypoints.length === 0) {
+        updateWaypointStatus('No waypoints to save', false);
+        return;
+      }
+      const waypoints = state.goalWaypoints.map((wp) => ({
+        lat: Number(wp.lat),
+        lon: Number(wp.lon),
+        yaw_deg: Number(wp.yaw_deg || 0.0)
+      }));
+      send({ op: 'save_waypoints_file', waypoints });
+    });
+    document.getElementById('loadWaypointsBtn').addEventListener('click', () => {
+      send({ op: 'load_waypoints_file' });
     });
 
     document.getElementById('popGoalBtn').addEventListener('click', () => {
@@ -1788,6 +2152,7 @@
     });
 
     document.getElementById('cameraFrame').src = CAMERA_IFRAME_URL;
+    initializeTrackedButtonsUi();
     applyViewMode();
     updateManualSliderLabels();
     renderManualStatus();
