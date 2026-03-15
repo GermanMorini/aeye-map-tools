@@ -11,14 +11,13 @@ import numpy as np
 import rclpy
 import websockets
 from ament_index_python.packages import get_package_share_directory
-from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix
 from std_srvs.srv import Trigger
 
-from interfaces.msg import NavTelemetry
+from interfaces.msg import CmdVelFinal, NavTelemetry
 from interfaces.srv import (
     BrakeNav,
     CameraPan,
@@ -173,7 +172,7 @@ class WebZoneServerNode(Node):
         self._nav_set_manual_mode_client = self.create_client(
             SetManualMode, self.nav_set_manual_mode_service
         )
-        self._teleop_cmd_pub = self.create_publisher(Twist, self.teleop_cmd_topic, 10)
+        self._teleop_cmd_pub = self.create_publisher(CmdVelFinal, self.teleop_cmd_topic, 10)
         self._nav_get_state_client = self.create_client(GetNavState, self.nav_get_state_service)
         self._nav_snapshot_client = self.create_client(GetNavSnapshot, self.nav_snapshot_service)
         self._camera_pan_client = self.create_client(CameraPan, self.camera_pan_service)
@@ -690,7 +689,9 @@ class WebZoneServerNode(Node):
             self.get_nav_state()
         return bool(res.ok), str(res.error), bool(res.enabled_after)
 
-    def set_manual_cmd(self, linear_x: float, angular_z: float) -> Tuple[bool, str]:
+    def set_manual_cmd(
+        self, linear_x: float, angular_z: float, brake_pct: int = 0
+    ) -> Tuple[bool, str]:
         if not np.isfinite(linear_x) or not np.isfinite(angular_z):
             return False, "invalid manual command values"
 
@@ -699,9 +700,11 @@ class WebZoneServerNode(Node):
         if not manual_enabled:
             return False, "manual control is disabled"
 
-        cmd = Twist()
-        cmd.linear.x = float(linear_x)
-        cmd.angular.z = float(angular_z)
+        brake_pct_clamped = max(0, min(100, int(brake_pct)))
+        cmd = CmdVelFinal()
+        cmd.twist.linear.x = float(linear_x)
+        cmd.twist.angular.z = float(angular_z)
+        cmd.brake_pct = brake_pct_clamped
         self._teleop_cmd_pub.publish(cmd)
 
         with self._lock:
@@ -1125,6 +1128,7 @@ class WebSocketApi:
             try:
                 linear_x = float(msg["linear_x"])
                 angular_z = float(msg["angular_z"])
+                brake_pct = int(float(msg.get("brake_pct", 0)))
             except (KeyError, ValueError, TypeError) as exc:
                 await self._send_ack(
                     ws,
@@ -1138,6 +1142,7 @@ class WebSocketApi:
                 self.node.set_manual_cmd,
                 linear_x,
                 angular_z,
+                brake_pct,
             )
             await self._send_ack(
                 ws,

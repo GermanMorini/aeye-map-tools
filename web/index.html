@@ -282,6 +282,13 @@
       border-color: #ca8a04;
       color: #1f2937;
     }
+    button.secondary.active:hover:not(:disabled),
+    button.secondary.manual-on:hover:not(:disabled) {
+      background: #eab308;
+      border-color: #a16207;
+      color: #1f2937;
+      filter: none;
+    }
     button.danger {
       background: linear-gradient(180deg, #d93629, #a82015);
       color: #ffffff;
@@ -1047,6 +1054,7 @@
     };
 
     const MANUAL_LOOP_HZ = 20.0;
+    const MANUAL_EMERGENCY_BRAKE_PCT = 100;
     const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
     const REQUEST_TIMEOUT_OVERRIDES_MS = {
       set_goal_ll: 15000
@@ -2392,16 +2400,21 @@
       state.manualCmd.angularZ = 0.0;
     }
 
-    function sendManualCmd(linearX, angularZ) {
+    function sendManualCmd(linearX, angularZ, brakePct = 0) {
       if (!state.manualControl.enabled) return;
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-      send({ op: 'set_manual_cmd', linear_x: linearX, angular_z: angularZ });
+      send({
+        op: 'set_manual_cmd',
+        linear_x: linearX,
+        angular_z: angularZ,
+        brake_pct: Math.max(0, Math.min(100, Math.round(Number(brakePct) || 0)))
+      });
     }
 
     function manualEmergencyStop() {
       state.manualCmd.linearX = 0.0;
       state.manualCmd.angularZ = 0.0;
-      sendManualCmd(0.0, 0.0);
+      sendManualCmd(0.0, 0.0, MANUAL_EMERGENCY_BRAKE_PCT);
       renderManualStatus();
     }
 
