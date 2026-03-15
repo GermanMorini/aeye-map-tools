@@ -557,7 +557,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      transform-origin: 50% 25%;
+      transform-origin: 50% 50%;
     }
     .wp-icon .wp-arrow {
       width: 0;
@@ -939,7 +939,6 @@
               <button id="mapToolAreaBtn" class="secondary" type="button" title="Area: measure polygon area and perimeter" aria-label="Area measure polygon">📐</button>
               <button id="mapToolInspectBtn" class="secondary" type="button" title="Inspect: show and copy map coordinates" aria-label="Inspect coordinates">📍</button>
               <button id="mapToolCenterRobotBtn" class="secondary" type="button" title="centrar vista en robot" aria-label="centrar vista en robot">🎯</button>
-              <button id="mapToolClearBtn" class="secondary" type="button" title="Clear: remove current map-tool drawings" aria-label="Clear map tool drawings">🚮</button>
               <button id="mapToolCloseBtn" class="secondary" type="button" title="Close: exit map tool mode" aria-label="Close map tools">❌</button>
             </div>
           </div>
@@ -1050,7 +1049,16 @@
       areaPoints: [],
       areaFinished: false,
       inspectLatLng: null,
-      mapToolDblZoomWasEnabled: true
+      mapToolDblZoomWasEnabled: true,
+      zoneDragSession: {
+        active: false,
+        layer: null,
+        startLatLng: null,
+        lastLatLng: null,
+        moved: false,
+        mapDraggingWasEnabled: true
+      },
+      zoneDragSuppressClickUntilMs: 0
     };
 
     const MANUAL_LOOP_HZ = 20.0;
@@ -1460,9 +1468,8 @@
       const areaBtn = document.getElementById('mapToolAreaBtn');
       const inspectBtn = document.getElementById('mapToolInspectBtn');
       const centerRobotBtn = document.getElementById('mapToolCenterRobotBtn');
-      const clearBtn = document.getElementById('mapToolClearBtn');
       const closeBtn = document.getElementById('mapToolCloseBtn');
-      if (!toolbar || !rulerBtn || !areaBtn || !inspectBtn || !centerRobotBtn || !clearBtn || !closeBtn) return;
+      if (!toolbar || !rulerBtn || !areaBtn || !inspectBtn || !centerRobotBtn || !closeBtn) return;
 
       const gpsMain = isGpsMainView();
       toolbar.style.display = gpsMain ? '' : 'none';
@@ -1476,8 +1483,12 @@
       areaBtn.disabled = disableAll;
       inspectBtn.disabled = disableAll;
       centerRobotBtn.disabled = disableAll || !state.robotMarker;
-      clearBtn.disabled = disableAll || !hasMapToolData();
       closeBtn.disabled = disableAll || !isMapToolActive();
+    }
+
+    function updateMapInteractionCursor() {
+      const mapContainer = map.getContainer();
+      mapContainer.style.cursor = (state.goalMode || isMapToolActive()) ? 'crosshair' : '';
     }
 
     function renderRulerTool() {
@@ -1674,6 +1685,7 @@
       }
       state.activeMapTool = toolName;
       state.mapToolPreviewLatLng = null;
+      updateMapInteractionCursor();
       setZoneEditingBlocked(true);
       state.mapToolDblZoomWasEnabled = map.doubleClickZoom.enabled();
       if (state.mapToolDblZoomWasEnabled) {
@@ -1688,6 +1700,7 @@
       const wasActive = isMapToolActive();
       state.activeMapTool = 'none';
       state.mapToolPreviewLatLng = null;
+      updateMapInteractionCursor();
       setZoneEditingBlocked(false);
       if (state.mapToolDblZoomWasEnabled && !map.doubleClickZoom.enabled()) {
         map.doubleClickZoom.enable();
@@ -1863,7 +1876,7 @@
             `<div class="wp-index">${Number(index) + 1}</div>` +
           '</div>',
         iconSize: [30, 30],
-        iconAnchor: [15, 8]
+        iconAnchor: [15, 15]
       });
     }
 
@@ -2016,15 +2029,14 @@
       btn.setAttribute('aria-label', btn.title);
       if (state.goalMode) {
         btn.classList.add('active');
-        map.getContainer().style.cursor = 'crosshair';
         updateWaypointStatus(
           'Waypoint mode activo: click+arrastre para fijar yaw de cada waypoint',
           true
         );
       } else {
         btn.classList.remove('active');
-        map.getContainer().style.cursor = '';
       }
+      updateMapInteractionCursor();
     }
 
     function addWaypoint(lat, lon, yawDeg) {
@@ -2916,6 +2928,126 @@
       return polygon;
     }
 
+    function isDrawToolbarModeActive() {
+      const toolbars = (drawControl && drawControl._toolbars)
+        ? Object.values(drawControl._toolbars)
+        : [];
+      return toolbars.some((toolbar) => {
+        const handler = toolbar && toolbar._activeMode && toolbar._activeMode.handler;
+        return Boolean(handler && typeof handler.enabled === 'function' && handler.enabled());
+      });
+    }
+
+    function shiftLatLngTree(latLngTree, dLat, dLng) {
+      if (!Array.isArray(latLngTree)) return latLngTree;
+      return latLngTree.map((entry) => {
+        if (Array.isArray(entry)) {
+          return shiftLatLngTree(entry, dLat, dLng);
+        }
+        return L.latLng(entry.lat + dLat, entry.lng + dLng);
+      });
+    }
+
+    function clearZoneDragSession() {
+      const session = state.zoneDragSession;
+      session.active = false;
+      session.layer = null;
+      session.startLatLng = null;
+      session.lastLatLng = null;
+      session.moved = false;
+      session.mapDraggingWasEnabled = true;
+    }
+
+    function onZoneDragMove(evt) {
+      const session = state.zoneDragSession;
+      if (!session.active || !session.layer || !evt || !evt.latlng || !session.lastLatLng) return;
+
+      const dLat = evt.latlng.lat - session.lastLatLng.lat;
+      const dLng = evt.latlng.lng - session.lastLatLng.lng;
+      if (!Number.isFinite(dLat) || !Number.isFinite(dLng)) return;
+      if (Math.abs(dLat) < 1e-12 && Math.abs(dLng) < 1e-12) return;
+
+      const latLngTree = session.layer.getLatLngs();
+      session.layer.setLatLngs(shiftLatLngTree(latLngTree, dLat, dLng));
+      if (typeof session.layer.redraw === 'function') {
+        session.layer.redraw();
+      }
+      session.lastLatLng = evt.latlng;
+
+      if (!session.moved && session.startLatLng) {
+        if (map.distance(session.startLatLng, evt.latlng) >= 0.25) {
+          session.moved = true;
+        }
+      }
+    }
+
+    function onZoneDragEnd() {
+      const session = state.zoneDragSession;
+      if (!session.active) return;
+
+      const moved = session.moved;
+      const mapDraggingWasEnabled = session.mapDraggingWasEnabled;
+      map.off('mousemove', onZoneDragMove);
+      map.off('mouseup', onZoneDragEnd);
+      window.removeEventListener('mouseup', onZoneDragEnd);
+      clearZoneDragSession();
+
+      if (mapDraggingWasEnabled && !map.dragging.enabled()) {
+        map.dragging.enable();
+      }
+
+      if (!moved) return;
+
+      state.zoneDragSuppressClickUntilMs = Date.now() + 250;
+      renderZoneList(buildPreviewDocument());
+      if (document.getElementById('autoSync').checked) {
+        pushLayersToServer();
+      }
+    }
+
+    function startZoneDrag(layer, evt) {
+      if (!layer || !evt || !evt.latlng) return;
+      if (state.zoneEditingBlocked || !isGpsMainView() || isMapToolActive() || state.goalMode) return;
+      if (isDrawToolbarModeActive()) return;
+
+      const domEvt = evt.originalEvent;
+      if (domEvt) {
+        if (typeof domEvt.button === 'number' && domEvt.button !== 0) return;
+        if (domEvt.ctrlKey || domEvt.altKey || domEvt.metaKey) return;
+      }
+
+      const session = state.zoneDragSession;
+      if (session.active) return;
+
+      session.active = true;
+      session.layer = layer;
+      session.startLatLng = evt.latlng;
+      session.lastLatLng = evt.latlng;
+      session.moved = false;
+      session.mapDraggingWasEnabled = map.dragging.enabled();
+
+      if (session.mapDraggingWasEnabled) {
+        map.dragging.disable();
+      }
+
+      map.on('mousemove', onZoneDragMove);
+      map.on('mouseup', onZoneDragEnd);
+      window.addEventListener('mouseup', onZoneDragEnd);
+
+      if (domEvt) {
+        domEvt.preventDefault();
+      }
+    }
+
+    function bindZoneLayerDrag(layer) {
+      if (!layer || typeof layer.on !== 'function') return;
+      if (layer._zoneDragBound === true) return;
+      layer.on('mousedown', (evt) => {
+        startZoneDrag(layer, evt);
+      });
+      layer._zoneDragBound = true;
+    }
+
     function renderMapFromZones(zones) {
       drawnItems.clearLayers();
       if (zones.length === 0) {
@@ -2928,6 +3060,7 @@
         if (polygon.length < 3) return;
         const latLngs = polygon.map((p) => [p.lat, p.lon]);
         const layer = makeLayerFromZone(zone, latLngs);
+        bindZoneLayerDrag(layer);
         drawnItems.addLayer(layer);
       });
     }
@@ -3226,6 +3359,7 @@
       }
       const layer = e.layer;
       layer.zoneMeta = { id: newZoneId(), type: 'no_go', enabled: true };
+      bindZoneLayerDrag(layer);
       drawnItems.addLayer(layer);
       renderZoneList(buildPreviewDocument());
       if (document.getElementById('autoSync').checked) {
@@ -3264,6 +3398,9 @@
     });
 
     drawnItems.on('click', (evt) => {
+      if (Date.now() < state.zoneDragSuppressClickUntilMs) {
+        return;
+      }
       if (state.zoneEditingBlocked) {
         setStatus('Exit map tool mode to edit zones', false);
         return;
@@ -3322,13 +3459,9 @@
     document.getElementById('mapToolCenterRobotBtn').addEventListener('click', () => {
       centerMapOnRobot();
     });
-    document.getElementById('mapToolClearBtn').addEventListener('click', () => {
-      clearMapToolData();
-      renderActiveMapTool();
-      setStatus('Map tool data cleared', true);
-    });
     document.getElementById('mapToolCloseBtn').addEventListener('click', () => {
-      deactivateMapTool({ clear: false });
+      deactivateMapTool({ clear: true });
+      setStatus('Map tool action canceled and cleared', false);
     });
 
     document.getElementById('goalModeBtn').addEventListener('click', () => {
@@ -3389,8 +3522,10 @@
 
     window.addEventListener('keydown', (event) => {
       const code = event.code;
+      const key = event.key;
+      const isEscape = code === 'Escape' || key === 'Escape';
       const snapshotModal = document.getElementById('snapshotModal');
-      if (code === 'Escape' && snapshotModal && snapshotModal.classList.contains('show')) {
+      if (isEscape && snapshotModal && snapshotModal.classList.contains('show')) {
         event.preventDefault();
         if (event.shiftKey) {
           downloadLastSnapshot();
@@ -3399,16 +3534,24 @@
         return;
       }
 
+      if (isMapToolActive()) {
+        if (isEscape) {
+          event.preventDefault();
+          deactivateMapTool({ clear: true });
+          setStatus('Map tool action canceled and cleared', false);
+          return;
+        }
+      }
+      if (isEscape && state.goalMode) {
+        event.preventDefault();
+        cancelGoalDraft();
+        setGoalModeUi(false);
+        return;
+      }
+
       if (isTextInputFocused()) return;
 
       if (isMapToolActive()) {
-        if (code === 'Escape') {
-          event.preventDefault();
-          clearMapToolData();
-          renderActiveMapTool();
-          setStatus('Map tool action canceled', false);
-          return;
-        }
         if (code === 'Backspace') {
           if (removeLastMapToolVertex()) {
             event.preventDefault();
@@ -3421,12 +3564,6 @@
             return;
           }
         }
-      }
-      if (code === 'Escape' && state.goalMode) {
-        event.preventDefault();
-        cancelGoalDraft();
-        setGoalModeUi(false);
-        return;
       }
 
       const cameraArrowByCode = {
