@@ -143,6 +143,10 @@
       flex-direction: column;
       gap: 12px;
     }
+    .narrow-right-stack {
+      display: none;
+      min-width: 0;
+    }
     .panel-section {
       min-width: 0;
       background: #ffffff;
@@ -155,6 +159,31 @@
       border-radius: 0;
       background: transparent;
       padding: 0;
+    }
+    .panel-section.mini-viewer {
+      display: none;
+      padding: 8px;
+    }
+    .panel-section.mini-viewer.desktop-active {
+      display: block;
+    }
+    .mini-viewer-host {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 600 / 388;
+      border: 1px solid #5d7590;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #f6fbff;
+    }
+    .mini-viewer-host .view-pane {
+      position: absolute;
+      inset: 0;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      opacity: 0.97;
+      pointer-events: auto;
     }
     .section-header {
       display: flex;
@@ -177,6 +206,27 @@
       gap: 8px;
       margin-bottom: 8px;
       width: 100%;
+    }
+    .panel-section.navigation .nav-grid-4,
+    .panel-section.navigation .nav-grid-2 {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 8px;
+      width: 100%;
+    }
+    .panel-section.navigation .nav-grid-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .panel-section.navigation .nav-grid-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .panel-section.navigation .nav-loop-row {
+      margin-bottom: 0;
+    }
+    .panel-section.navigation button.icon-only {
+      padding: 8px;
+      font-size: 18px;
+      line-height: 1;
     }
     .row > * { min-width: 0; }
     .row > *:only-child { grid-column: 1 / -1; }
@@ -310,6 +360,7 @@
       height: 100%;
       border: 0;
       background: #000;
+      pointer-events: none;
     }
     #gpsPane {
       z-index: 1100;
@@ -319,12 +370,105 @@
       width: 100%;
       height: 100%;
     }
+    .map-tools-toolbar {
+      position: absolute;
+      top: 12px;
+      left: 56px;
+      z-index: 1280;
+      display: none;
+      width: min(430px, calc(100% - 68px));
+      pointer-events: none;
+      gap: 6px;
+      flex-direction: column;
+    }
+    #viewStage.mode-gps-main .map-tools-toolbar {
+      display: flex;
+    }
+    .map-tools-grid {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      gap: 6px;
+      pointer-events: auto;
+    }
+    .map-tools-grid button {
+      width: 38px;
+      min-width: 38px;
+      max-width: 38px;
+      min-height: 34px;
+      padding: 4px;
+      font-size: 20px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .map-tool-info {
+      pointer-events: auto;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid #5d7590;
+      color: #102235;
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 12px;
+      line-height: 1.25;
+      min-height: 30px;
+      box-shadow: 0 4px 10px rgba(17, 34, 52, 0.18);
+    }
+    .leaflet-tooltip.map-measure-tooltip {
+      background: rgba(16, 34, 53, 0.9);
+      color: #ffffff;
+      border: 1px solid #7dd3fc;
+      border-radius: 8px;
+      padding: 2px 6px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      box-shadow: 0 3px 8px rgba(17, 34, 52, 0.28);
+      pointer-events: none;
+    }
+    .leaflet-tooltip.map-measure-tooltip::before {
+      display: none;
+    }
+    .map-inspect-popup {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 170px;
+    }
+    .map-inspect-popup .coords {
+      font-family: "Consolas", "Monaco", monospace;
+      font-size: 12px;
+      line-height: 1.3;
+      color: #102235;
+      word-break: break-word;
+    }
+    .map-inspect-copy {
+      width: auto;
+      min-height: 28px;
+      padding: 4px 10px;
+      justify-self: start;
+      background: #e6eef7;
+      color: #102235;
+      border: 1px solid #5d7590;
+      font-weight: 600;
+    }
+    .leaflet-container.zones-edit-blocked .leaflet-draw-toolbar a,
+    .leaflet-container.zones-edit-blocked .leaflet-draw-actions a {
+      pointer-events: none !important;
+      opacity: 0.45;
+      filter: saturate(0.2);
+    }
     #swapViewBtn {
       position: absolute;
       bottom: 12px;
       left: 12px;
       z-index: 1300;
-      width: auto;
+      width: 42px;
+      min-width: 42px;
+      max-width: 42px;
+      min-height: 34px;
+      padding: 4px;
+      font-size: 20px;
+      line-height: 1;
       backdrop-filter: blur(2px);
     }
     #viewStage.mode-camera-main #cameraPane {
@@ -342,7 +486,7 @@
       aspect-ratio: 600 / 388;
       height: auto;
       opacity: 0.97;
-      pointer-events: none;
+      pointer-events: auto;
     }
     #viewStage.mode-gps-main #gpsPane {
       inset: 0;
@@ -372,9 +516,19 @@
       padding: 0;
       list-style: none;
       border: 1px solid var(--line);
+      border-top: 0;
       border-radius: 8px;
-      overflow: hidden;
+      max-height: clamp(140px, 24vh, 280px);
+      overflow-y: auto;
+      overflow-x: hidden;
       background: #ffffff;
+    }
+    .panel-section.zones .zones-actions-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+      width: 100%;
     }
     .zone-list li {
       padding: 8px;
@@ -522,6 +676,24 @@
       margin: 0;
       font-size: 15px;
     }
+    .modal-shortcuts {
+      margin-left: auto;
+      margin-right: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .modal-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .modal-actions button {
+      width: auto;
+      min-width: 96px;
+      min-height: 34px;
+      padding: 6px 10px;
+    }
     #snapshotImage {
       width: 100%;
       border: 1px solid #5d7590;
@@ -539,17 +711,21 @@
       .panel-sections {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-areas:
+          "connection right"
+          "zones navigation"
+          "telemetry telemetry";
         gap: 12px;
       }
-      .panel-section.connection { order: 1; }
-      .panel-section.sliders { order: 2; }
-      .panel-section.camera { order: 3; }
-      .panel-section.zones { order: 4; }
-      .panel-section.navigation { order: 5; }
-      .panel-section.telemetry { order: 6; }
-      .panel-section.connection,
-      .panel-section.telemetry {
-        grid-column: 1 / -1;
+      .panel-section.connection { grid-area: connection; }
+      .panel-section.zones { grid-area: zones; }
+      .panel-section.navigation { grid-area: navigation; }
+      .panel-section.telemetry { grid-area: telemetry; }
+      .narrow-right-stack {
+        grid-area: right;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
       }
       .visual-col { height: auto; }
       #viewStage { height: 60vh; }
@@ -567,6 +743,23 @@
         max-height: 200px;
         right: 10px;
         bottom: 10px;
+      }
+      .map-tools-toolbar {
+        left: 48px;
+        width: min(390px, calc(100% - 58px));
+      }
+      .map-tools-grid {
+        gap: 5px;
+      }
+      .map-tools-grid button {
+        width: 34px;
+        min-width: 34px;
+        max-width: 34px;
+        min-height: 32px;
+        font-size: 18px;
+      }
+      .panel-section.mini-viewer {
+        display: none !important;
       }
     }
   </style>
@@ -601,15 +794,22 @@
             </div>
           </div>
         </section>
+        <div id="narrowRightStack" class="narrow-right-stack"></div>
 
         <section class="panel-section zones">
           <h2>Zones</h2>
-          <div class="row">
+          <div class="zones-actions-grid">
             <button id="refreshBtn" class="secondary">
               <span class="btn-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4V1L7 6l5 5V7a5 5 0 1 1-4.9 6h-2.02A7 7 0 1 0 17.65 6.35z"/></svg>
               </span>
               <span class="btn-label">Refresh</span>
+            </button>
+            <button id="clearBtn" class="danger">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M16 9v10H8V9zm-1.5-6h-5l-1 1H5v2h14V4h-3.5z"/></svg>
+              </span>
+              <span class="btn-label">Clear</span>
             </button>
             <button id="saveBtn" class="secondary">
               <span class="btn-icon" aria-hidden="true">
@@ -625,20 +825,6 @@
             </button>
           </div>
           <div class="row">
-            <button id="pushBtn" class="success">
-              <span class="btn-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5zm7-18-5.5 5.5 1.42 1.42L11 6.84V16h2V6.84l3.08 3.08 1.42-1.42z"/></svg>
-              </span>
-              <span class="btn-label">Push</span>
-            </button>
-            <button id="clearBtn" class="danger">
-              <span class="btn-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M16 9v10H8V9zm-1.5-6h-5l-1 1H5v2h14V4h-3.5z"/></svg>
-              </span>
-              <span class="btn-label">Clear</span>
-            </button>
-          </div>
-          <div class="row">
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
               <input id="autoSync" type="checkbox" checked style="width:auto;" /> Auto-sync edits
             </label>
@@ -649,31 +835,18 @@
         <section class="panel-section navigation">
           <h2>Navigation</h2>
           <div class="stack">
-            <div class="row">
-              <button id="goalModeBtn" class="secondary">Waypoint Mode</button>
+            <div class="nav-grid-4">
+              <button id="goalModeBtn" class="secondary icon-only" title="modo insercion de waypoints (F) · OFF" aria-label="modo insercion de waypoints (F) · OFF">📌</button>
+              <button id="popGoalBtn" class="secondary icon-only" title="Undo waypoint" aria-label="Undo waypoint" disabled>↩️</button>
+              <button id="removeSelectedGoalsBtn" class="danger icon-only" title="Remove selected waypoints" aria-label="Remove selected waypoints" disabled>🗑️</button>
+              <button id="clearGoalsBtn" class="danger icon-only" title="Clear waypoints" aria-label="Clear waypoints" disabled>🧹</button>
+            </div>
+            <div class="nav-grid-2">
               <button id="sendGoalsBtn" class="success" disabled>
                 <span class="btn-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg>
                 </span>
                 <span class="btn-label">Send</span>
-              </button>
-              <button id="popGoalBtn" class="secondary" disabled>
-                <span class="btn-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M10 9V5l-7 7 7 7v-4h4a7 7 0 0 0 0-14h-3v2h3a5 5 0 0 1 0 10z"/></svg>
-                </span>
-                <span class="btn-label">Undo</span>
-              </button>
-              <button id="removeSelectedGoalsBtn" class="danger" disabled>
-                <span class="btn-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M9 3h6l1 1h5v2H3V4h5zm1 6h2v8h-2zm4 0h2v8h-2zM6 9h2v8H6z"/></svg>
-                </span>
-                <span class="btn-label">Remove</span>
-              </button>
-              <button id="clearGoalsBtn" class="danger" disabled>
-                <span class="btn-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M16 9v10H8V9zm-1.5-6h-5l-1 1H5v2h14V4h-3.5z"/></svg>
-                </span>
-                <span class="btn-label">Clear</span>
               </button>
               <button id="cancelGoalBtn" class="danger">
                 <span class="btn-icon" aria-hidden="true">
@@ -682,33 +855,16 @@
                 <span class="btn-label">Cancel</span>
               </button>
             </div>
-            <div class="row">
+            <div class="nav-grid-4">
+              <button id="saveWaypointsBtn" class="secondary icon-only" title="Save waypoints" aria-label="Save waypoints">💾</button>
+              <button id="loadWaypointsBtn" class="secondary icon-only" title="Load waypoints" aria-label="Load waypoints">📂</button>
+              <button id="snapshotBtn" class="secondary icon-only" title="Snapshot (Q)" aria-label="Snapshot (Q)">📸</button>
+              <button id="manualModeBtn" class="secondary" title="modo manual (M) · OFF" aria-label="modo manual (M) · OFF">OFF</button>
+            </div>
+            <div class="row nav-loop-row">
               <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
                 <input id="goalLoop" type="checkbox" checked style="width:auto;" /> Loop route
               </label>
-            </div>
-            <div class="row">
-              <button id="saveWaypointsBtn" class="secondary">
-                <span class="btn-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zM7 5h8v4H7zm12 14H5V9h14z"/></svg>
-                </span>
-                <span class="btn-label">Save</span>
-              </button>
-              <button id="loadWaypointsBtn" class="secondary">
-                <span class="btn-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-7 11-3-3h2V9h2v5h2z"/></svg>
-                </span>
-                <span class="btn-label">Load</span>
-              </button>
-            </div>
-            <div class="row">
-              <button id="manualModeBtn" class="secondary">Manual: OFF</button>
-              <button id="snapshotBtn" class="secondary">
-                <span class="btn-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M9 4 7.17 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.17L15 4zm3 14a5 5 0 1 1 5-5 5 5 0 0 1-5 5z"/></svg>
-                </span>
-                <span class="btn-label">Snapshot</span>
-              </button>
             </div>
           </div>
         </section>
@@ -717,11 +873,11 @@
           <h2>Sliders</h2>
           <div class="stack">
             <label>
-              Linear speed max: <span id="manualLinearValue">1.20</span> m/s
+              Linear speed (m/2): <span id="manualLinearValue">1.20</span>
             </label>
             <input id="manualLinearSlider" type="range" min="1.0" max="4.0" step="0.01" value="1.20" />
             <label>
-              Angular speed max: <span id="manualAngularValue">0.40</span> rad/s
+              Angular speed (rad/s): <span id="manualAngularValue">0.40</span>
             </label>
             <input id="manualAngularSlider" type="range" min="0.1" max="0.4" step="0.01" value="0.40" />
           </div>
@@ -756,18 +912,32 @@
             <div id="cameraStatus" class="status">camera: n/a</div>
           </div>
         </section>
+        <section id="miniViewerSection" class="panel-section mini-viewer">
+          <div id="miniViewerHost" class="mini-viewer-host"></div>
+        </section>
       </div>
     </div>
     <div id="visualCol" class="visual-col">
       <div id="visualTopRow" class="visual-top-row"></div>
       <div id="viewStage" class="mode-camera-main">
         <div id="cameraPane" class="view-pane">
-          <iframe id="cameraFrame" title="Camera feed" loading="lazy"></iframe>
+          <iframe id="cameraFrame" title="Camera feed" loading="lazy" tabindex="-1"></iframe>
         </div>
         <div id="gpsPane" class="view-pane">
           <div id="map"></div>
+          <div id="mapToolsToolbar" class="map-tools-toolbar">
+            <div id="mapToolInfo" class="map-tool-info">Map tools idle.</div>
+            <div class="map-tools-grid">
+              <button id="mapToolRulerBtn" class="secondary" type="button" title="Ruler: measure distance by segments" aria-label="Ruler measure distance">📏</button>
+              <button id="mapToolAreaBtn" class="secondary" type="button" title="Area: measure polygon area and perimeter" aria-label="Area measure polygon">📐</button>
+              <button id="mapToolInspectBtn" class="secondary" type="button" title="Inspect: show and copy map coordinates" aria-label="Inspect coordinates">📍</button>
+              <button id="mapToolCenterRobotBtn" class="secondary" type="button" title="centrar vista en robot" aria-label="centrar vista en robot">🎯</button>
+              <button id="mapToolClearBtn" class="secondary" type="button" title="Clear: remove current map-tool drawings" aria-label="Clear map tool drawings">🚮</button>
+              <button id="mapToolCloseBtn" class="secondary" type="button" title="Close: exit map tool mode" aria-label="Close map tools">❌</button>
+            </div>
+          </div>
         </div>
-        <button id="swapViewBtn" class="secondary" type="button">Ver GPS grande</button>
+        <button id="swapViewBtn" class="secondary" type="button" title="intercambiar camara/mapa (E)" aria-label="intercambiar camara/mapa (E)">🔄</button>
       </div>
     </div>
   </div>
@@ -776,7 +946,11 @@
     <div class="modal-card">
       <div class="modal-header">
         <h3>Navigation Snapshot</h3>
-        <button id="snapshotCloseBtn" class="secondary">Close</button>
+        <div class="modal-shortcuts">Esc: Close · Shift+Esc: Download + Close</div>
+        <div class="modal-actions">
+          <button id="snapshotDownloadBtn" class="secondary" title="Download snapshot image" aria-label="Download snapshot image" disabled>Download</button>
+          <button id="snapshotCloseBtn" class="secondary">Close</button>
+        </div>
       </div>
       <img id="snapshotImage" alt="nav snapshot" />
       <div id="snapshotMeta">No snapshot loaded.</div>
@@ -826,6 +1000,8 @@
     map.addControl(drawControl);
     const goalLayer = L.layerGroup();
     map.addLayer(goalLayer);
+    const measurementLayer = L.layerGroup();
+    map.addLayer(measurementLayer);
 
     const state = {
       ws: null,
@@ -858,7 +1034,16 @@
       buttonBaseLabels: new Map(),
       connectAttemptActive: false,
       connectErrorDialogShown: false,
-      userInitiatedDisconnect: false
+      userInitiatedDisconnect: false,
+      activeMapTool: 'none',
+      zoneEditingBlocked: false,
+      mapToolPreviewLatLng: null,
+      rulerPoints: [],
+      rulerFinished: false,
+      areaPoints: [],
+      areaFinished: false,
+      inspectLatLng: null,
+      mapToolDblZoomWasEnabled: true
     };
 
     const MANUAL_LOOP_HZ = 20.0;
@@ -869,8 +1054,7 @@
     const TRACKED_OP_UI = {
       set_zones_geojson: {
         buttons: {
-          saveBtn: { pending: 'Saving' },
-          pushBtn: { pending: 'Pushing' }
+          saveBtn: { pending: 'Saving' }
         }
       },
       load_zones_file: {
@@ -915,6 +1099,55 @@
       s.className = 'status';
       if (ok === true) s.classList.add('good');
       if (ok === false) s.classList.add('bad');
+    }
+
+    function snapshotFileExtensionFromMime(mime) {
+      const value = String(mime || '').toLowerCase();
+      if (value.includes('jpeg') || value.includes('jpg')) return 'jpg';
+      if (value.includes('webp')) return 'webp';
+      return 'png';
+    }
+
+    function snapshotStampForFilename(stamp) {
+      const sec = Number(stamp && stamp.sec);
+      const nsec = Number(stamp && stamp.nanosec);
+      if (!Number.isFinite(sec)) {
+        return String(Date.now());
+      }
+      const secPart = Math.max(0, Math.trunc(sec));
+      const nsecPart = Number.isFinite(nsec) ? Math.max(0, Math.trunc(nsec)) : 0;
+      return `${secPart}_${String(nsecPart).padStart(9, '0')}`;
+    }
+
+    function downloadLastSnapshot() {
+      const snap = state.lastSnapshot;
+      if (
+        !snap ||
+        snap.ok !== true ||
+        typeof snap.image_b64 !== 'string' ||
+        snap.image_b64.length === 0
+      ) {
+        setStatus('No snapshot available to download', false);
+        return;
+      }
+      const mime = snap.mime || 'image/png';
+      const ext = snapshotFileExtensionFromMime(mime);
+      const stampPart = snapshotStampForFilename(snap.stamp || null);
+      const filename = `nav_snapshot_${stampPart}.${ext}`;
+      const link = document.createElement('a');
+      link.href = `data:${mime};base64,${snap.image_b64}`;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setStatus(`Snapshot downloaded: ${filename}`, true);
+    }
+
+    function closeSnapshotModal() {
+      const modal = document.getElementById('snapshotModal');
+      if (modal) {
+        modal.classList.remove('show');
+      }
     }
 
     function setConnectionState(connected) {
@@ -1056,6 +1289,542 @@
 
     function isGpsMainView() {
       return state.primaryView === 'gps';
+    }
+
+    function isMapToolActive() {
+      return state.activeMapTool !== 'none';
+    }
+
+    function formatDistanceMeters(meters) {
+      const value = Number(meters || 0.0);
+      if (!Number.isFinite(value)) return 'n/a';
+      if (Math.abs(value) >= 1000.0) return `${(value / 1000.0).toFixed(2)} km`;
+      return `${value.toFixed(2)} m`;
+    }
+
+    function formatAreaMeters2(area) {
+      const value = Number(area || 0.0);
+      if (!Number.isFinite(value)) return 'n/a';
+      if (Math.abs(value) >= 1000000.0) return `${(value / 1000000.0).toFixed(3)} km²`;
+      return `${value.toFixed(2)} m²`;
+    }
+
+    function formatLatLon(latlng) {
+      if (!latlng) return 'n/a';
+      return `${Number(latlng.lat).toFixed(7)}, ${Number(latlng.lng).toFixed(7)}`;
+    }
+
+    function setMapToolInfo(text) {
+      const infoEl = document.getElementById('mapToolInfo');
+      if (!infoEl) return;
+      infoEl.textContent = String(text || 'Map tools idle.');
+    }
+
+    function hasMapToolData() {
+      return (
+        state.rulerPoints.length > 0
+        || state.areaPoints.length > 0
+        || state.inspectLatLng != null
+      );
+    }
+
+    function calculatePathDistanceMeters(points) {
+      if (!Array.isArray(points) || points.length < 2) return 0.0;
+      let total = 0.0;
+      for (let idx = 1; idx < points.length; idx += 1) {
+        total += map.distance(points[idx - 1], points[idx]);
+      }
+      return total;
+    }
+
+    function addMeasurementTooltip(anchor, text) {
+      if (!anchor) return;
+      L.tooltip({
+        permanent: true,
+        direction: 'right',
+        offset: [8, -2],
+        className: 'map-measure-tooltip',
+        opacity: 1.0,
+        interactive: false
+      })
+        .setLatLng(anchor)
+        .setContent(String(text || ''))
+        .addTo(measurementLayer);
+    }
+
+    function calculateClosedPerimeterMeters(points) {
+      if (!Array.isArray(points) || points.length < 2) return 0.0;
+      let total = calculatePathDistanceMeters(points);
+      if (points.length >= 3) {
+        total += map.distance(points[points.length - 1], points[0]);
+      }
+      return total;
+    }
+
+    function calculateCentroidLatLng(points) {
+      if (!Array.isArray(points) || points.length === 0) return null;
+      let sumLat = 0.0;
+      let sumLng = 0.0;
+      points.forEach((pt) => {
+        sumLat += Number(pt.lat);
+        sumLng += Number(pt.lng);
+      });
+      return L.latLng(sumLat / points.length, sumLng / points.length);
+    }
+
+    function computeAreaMeters2(points) {
+      if (!Array.isArray(points) || points.length < 3) return 0.0;
+      if (!L.GeometryUtil || typeof L.GeometryUtil.geodesicArea !== 'function') {
+        return 0.0;
+      }
+      return Math.abs(Number(L.GeometryUtil.geodesicArea(points) || 0.0));
+    }
+
+    async function copyTextToClipboard(text) {
+      const value = String(text || '');
+      if (!value) return false;
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(value);
+          return true;
+        }
+      } catch (err) {
+        // Fallback below.
+      }
+      const el = document.createElement('textarea');
+      el.value = value;
+      el.style.position = 'fixed';
+      el.style.left = '-10000px';
+      document.body.appendChild(el);
+      el.focus();
+      el.select();
+      let ok = false;
+      try {
+        ok = document.execCommand('copy');
+      } catch (err) {
+        ok = false;
+      }
+      document.body.removeChild(el);
+      return ok;
+    }
+
+    function clearMapToolData() {
+      state.mapToolPreviewLatLng = null;
+      state.rulerPoints = [];
+      state.rulerFinished = false;
+      state.areaPoints = [];
+      state.areaFinished = false;
+      state.inspectLatLng = null;
+      measurementLayer.clearLayers();
+      map.closePopup();
+    }
+
+    function setZoneEditingBlocked(blocked) {
+      state.zoneEditingBlocked = blocked === true;
+      const mapContainer = map.getContainer();
+      mapContainer.classList.toggle('zones-edit-blocked', state.zoneEditingBlocked);
+
+      const toolbars = (drawControl && drawControl._toolbars)
+        ? Object.values(drawControl._toolbars)
+        : [];
+      toolbars.forEach((toolbar) => {
+        if (!toolbar) return;
+        if (
+          state.zoneEditingBlocked
+          && toolbar._activeMode
+          && toolbar._activeMode.handler
+          && typeof toolbar._activeMode.handler.disable === 'function'
+        ) {
+          toolbar._activeMode.handler.disable();
+        }
+        if (toolbar._container) {
+          toolbar._container.classList.toggle('disabled-by-map-tool', state.zoneEditingBlocked);
+        }
+        if (toolbar._actionsContainer) {
+          toolbar._actionsContainer.classList.toggle('disabled-by-map-tool', state.zoneEditingBlocked);
+        }
+      });
+    }
+
+    function updateMapToolsToolbarUi() {
+      const toolbar = document.getElementById('mapToolsToolbar');
+      const rulerBtn = document.getElementById('mapToolRulerBtn');
+      const areaBtn = document.getElementById('mapToolAreaBtn');
+      const inspectBtn = document.getElementById('mapToolInspectBtn');
+      const centerRobotBtn = document.getElementById('mapToolCenterRobotBtn');
+      const clearBtn = document.getElementById('mapToolClearBtn');
+      const closeBtn = document.getElementById('mapToolCloseBtn');
+      if (!toolbar || !rulerBtn || !areaBtn || !inspectBtn || !centerRobotBtn || !clearBtn || !closeBtn) return;
+
+      const gpsMain = isGpsMainView();
+      toolbar.style.display = gpsMain ? '' : 'none';
+
+      rulerBtn.classList.toggle('active', state.activeMapTool === 'ruler');
+      areaBtn.classList.toggle('active', state.activeMapTool === 'area');
+      inspectBtn.classList.toggle('active', state.activeMapTool === 'inspect');
+
+      const disableAll = !gpsMain;
+      rulerBtn.disabled = disableAll;
+      areaBtn.disabled = disableAll;
+      inspectBtn.disabled = disableAll;
+      centerRobotBtn.disabled = disableAll || !state.robotMarker;
+      clearBtn.disabled = disableAll || !hasMapToolData();
+      closeBtn.disabled = disableAll || !isMapToolActive();
+    }
+
+    function renderRulerTool() {
+      const points = state.rulerPoints;
+      if (points.length === 0) {
+        setMapToolInfo('Ruler: click to set the first point.');
+        return;
+      }
+
+      points.forEach((pt) => {
+        L.circleMarker(pt, {
+          radius: 4,
+          color: '#14b8a6',
+          weight: 2,
+          fillColor: '#14b8a6',
+          fillOpacity: 0.9
+        }).addTo(measurementLayer);
+      });
+
+      if (points.length >= 2) {
+        L.polyline(points, {
+          color: '#22c55e',
+          weight: 3,
+          opacity: 0.95
+        }).addTo(measurementLayer);
+      }
+
+      if (!state.rulerFinished && state.mapToolPreviewLatLng && points.length >= 1) {
+        L.polyline([points[points.length - 1], state.mapToolPreviewLatLng], {
+          color: '#22c55e',
+          weight: 2,
+          opacity: 0.85,
+          dashArray: '6 6'
+        }).addTo(measurementLayer);
+      }
+
+      const committed = calculatePathDistanceMeters(points);
+      let segment = 0.0;
+      let total = committed;
+      if (!state.rulerFinished && state.mapToolPreviewLatLng && points.length >= 1) {
+        segment = map.distance(points[points.length - 1], state.mapToolPreviewLatLng);
+        total += segment;
+      } else if (points.length >= 2) {
+        segment = map.distance(points[points.length - 2], points[points.length - 1]);
+      }
+
+      const anchor = (!state.rulerFinished && state.mapToolPreviewLatLng)
+        ? state.mapToolPreviewLatLng
+        : points[points.length - 1];
+      addMeasurementTooltip(
+        anchor,
+        `Seg ${formatDistanceMeters(segment)} · Total ${formatDistanceMeters(total)}`
+      );
+
+      if (state.rulerFinished) {
+        setMapToolInfo(`Ruler fixed: Total ${formatDistanceMeters(total)}.`);
+      } else {
+        setMapToolInfo(`Ruler: Seg ${formatDistanceMeters(segment)} · Total ${formatDistanceMeters(total)}.`);
+      }
+    }
+
+    function renderAreaTool() {
+      const points = state.areaPoints;
+      if (points.length === 0) {
+        setMapToolInfo('Area: click to add polygon vertices.');
+        return;
+      }
+
+      points.forEach((pt) => {
+        L.circleMarker(pt, {
+          radius: 4,
+          color: '#2563eb',
+          weight: 2,
+          fillColor: '#2563eb',
+          fillOpacity: 0.9
+        }).addTo(measurementLayer);
+      });
+
+      let drawPoints = points.slice();
+      if (!state.areaFinished && state.mapToolPreviewLatLng) {
+        drawPoints = drawPoints.concat([state.mapToolPreviewLatLng]);
+      }
+
+      if (drawPoints.length >= 2) {
+        const areaLineStyle = {
+          color: '#2563eb',
+          weight: 2,
+          opacity: 0.95
+        };
+        if (!state.areaFinished) {
+          areaLineStyle.dashArray = '6 5';
+        }
+        L.polyline(drawPoints, areaLineStyle).addTo(measurementLayer);
+      }
+
+      if (state.areaFinished && points.length >= 3) {
+        L.polygon(points, {
+          color: '#2563eb',
+          weight: 2,
+          fillColor: '#60a5fa',
+          fillOpacity: 0.20
+        }).addTo(measurementLayer);
+      } else if (!state.areaFinished && drawPoints.length >= 3) {
+        L.polygon(drawPoints, {
+          color: '#2563eb',
+          weight: 1,
+          fillColor: '#60a5fa',
+          fillOpacity: 0.12
+        }).addTo(measurementLayer);
+      }
+
+      let metricPoints = points.slice();
+      if (!state.areaFinished && state.mapToolPreviewLatLng) {
+        metricPoints = metricPoints.concat([state.mapToolPreviewLatLng]);
+      }
+
+      let perimeter = 0.0;
+      let area = 0.0;
+      if (metricPoints.length >= 2) {
+        perimeter = calculateClosedPerimeterMeters(metricPoints);
+      }
+      if (metricPoints.length >= 3) {
+        area = computeAreaMeters2(metricPoints);
+      }
+
+      const anchor = calculateCentroidLatLng(metricPoints)
+        || state.mapToolPreviewLatLng
+        || points[points.length - 1];
+      if (anchor && metricPoints.length >= 2) {
+        addMeasurementTooltip(
+          anchor,
+          `Area ${formatAreaMeters2(area)} · Perim ${formatDistanceMeters(perimeter)}`
+        );
+      }
+
+      if (state.areaFinished) {
+        setMapToolInfo(`Area fixed: ${formatAreaMeters2(area)} · Perim ${formatDistanceMeters(perimeter)}.`);
+      } else if (metricPoints.length >= 3) {
+        setMapToolInfo(`Area: ${formatAreaMeters2(area)} · Perim ${formatDistanceMeters(perimeter)} · dblclick/Enter or click first point to close.`);
+      } else if (metricPoints.length >= 2) {
+        setMapToolInfo(`Area: add one more vertex (current path ${formatDistanceMeters(calculatePathDistanceMeters(metricPoints))}).`);
+      } else {
+        setMapToolInfo('Area: add more vertices to compute metrics.');
+      }
+    }
+
+    function renderInspectTool() {
+      if (!state.inspectLatLng) {
+        setMapToolInfo('Inspect: click map to read/copy coordinates.');
+        return;
+      }
+      L.circleMarker(state.inspectLatLng, {
+        radius: 5,
+        color: '#ef4444',
+        weight: 2,
+        fillColor: '#ef4444',
+        fillOpacity: 0.9
+      }).addTo(measurementLayer);
+      setMapToolInfo(`Inspect: ${formatLatLon(state.inspectLatLng)}.`);
+    }
+
+    function renderActiveMapTool() {
+      measurementLayer.clearLayers();
+      if (!isMapToolActive()) {
+        setMapToolInfo('Map tools idle.');
+        updateMapToolsToolbarUi();
+        return;
+      }
+
+      if (state.activeMapTool === 'ruler') {
+        renderRulerTool();
+      } else if (state.activeMapTool === 'area') {
+        renderAreaTool();
+      } else if (state.activeMapTool === 'inspect') {
+        renderInspectTool();
+      }
+      updateMapToolsToolbarUi();
+    }
+
+    function activateMapTool(toolName) {
+      if (!isGpsMainView()) {
+        setStatus('Map tools only available with GPS in main view', false);
+        return;
+      }
+      if (!['ruler', 'area', 'inspect'].includes(toolName)) return;
+
+      if (state.goalMode) {
+        cancelGoalDraft();
+        setGoalModeUi(false);
+      }
+
+      if (state.activeMapTool !== toolName) {
+        clearMapToolData();
+      }
+      state.activeMapTool = toolName;
+      state.mapToolPreviewLatLng = null;
+      setZoneEditingBlocked(true);
+      state.mapToolDblZoomWasEnabled = map.doubleClickZoom.enabled();
+      if (state.mapToolDblZoomWasEnabled) {
+        map.doubleClickZoom.disable();
+      }
+      renderActiveMapTool();
+      setStatus(`Map tool: ${toolName}`, true);
+    }
+
+    function deactivateMapTool(options = {}) {
+      const clearData = options.clear === true;
+      const wasActive = isMapToolActive();
+      state.activeMapTool = 'none';
+      state.mapToolPreviewLatLng = null;
+      setZoneEditingBlocked(false);
+      if (state.mapToolDblZoomWasEnabled && !map.doubleClickZoom.enabled()) {
+        map.doubleClickZoom.enable();
+      }
+      if (clearData) {
+        clearMapToolData();
+      } else {
+        measurementLayer.clearLayers();
+      }
+      renderActiveMapTool();
+      if (wasActive) {
+        setStatus('Map tools closed', true);
+      }
+    }
+
+    function finalizeActiveMapTool() {
+      if (state.activeMapTool === 'ruler') {
+        if (state.rulerPoints.length < 2) {
+          setStatus('Ruler needs at least 2 points', false);
+          return false;
+        }
+        state.rulerFinished = true;
+        state.mapToolPreviewLatLng = null;
+        renderActiveMapTool();
+        return true;
+      }
+      if (state.activeMapTool === 'area') {
+        if (state.areaPoints.length < 3) {
+          setStatus('Area tool needs at least 3 points', false);
+          return false;
+        }
+        state.areaFinished = true;
+        state.mapToolPreviewLatLng = null;
+        renderActiveMapTool();
+        return true;
+      }
+      return false;
+    }
+
+    function removeLastMapToolVertex() {
+      if (state.activeMapTool === 'ruler') {
+        if (state.rulerPoints.length === 0) return false;
+        state.rulerPoints.pop();
+        state.rulerFinished = false;
+        renderActiveMapTool();
+        return true;
+      }
+      if (state.activeMapTool === 'area') {
+        if (state.areaPoints.length === 0) return false;
+        state.areaPoints.pop();
+        state.areaFinished = false;
+        renderActiveMapTool();
+        return true;
+      }
+      return false;
+    }
+
+    function handleInspectClick(latlng) {
+      state.inspectLatLng = L.latLng(latlng.lat, latlng.lng);
+      renderActiveMapTool();
+      const coordsText = formatLatLon(state.inspectLatLng);
+      const btnId = `inspect-copy-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+      const html = `<div class="map-inspect-popup"><div class="coords">${coordsText}</div><button type="button" id="${btnId}" class="map-inspect-copy">Copy</button></div>`;
+      map.openPopup(L.popup({
+        closeButton: true,
+        autoClose: true,
+        closeOnClick: false,
+      }).setLatLng(state.inspectLatLng).setContent(html));
+      window.setTimeout(() => {
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
+        btn.addEventListener('click', async (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          const ok = await copyTextToClipboard(coordsText);
+          if (ok) {
+            setStatus(`Copied: ${coordsText}`, true);
+          } else {
+            setStatus('Copy failed', false);
+          }
+        });
+      }, 0);
+    }
+
+    function handleMapToolClick(evt) {
+      if (!isMapToolActive() || !isGpsMainView()) return;
+      const latlng = evt && evt.latlng ? evt.latlng : null;
+      if (!latlng) return;
+      if (state.activeMapTool === 'inspect') {
+        handleInspectClick(latlng);
+        return;
+      }
+      if (state.activeMapTool === 'ruler') {
+        state.rulerPoints.push(L.latLng(latlng.lat, latlng.lng));
+        state.rulerFinished = false;
+        renderActiveMapTool();
+        return;
+      }
+      if (state.activeMapTool === 'area') {
+        if (state.areaFinished) {
+          // Start a new polygon after one has been closed.
+          state.areaPoints = [L.latLng(latlng.lat, latlng.lng)];
+          state.areaFinished = false;
+          state.mapToolPreviewLatLng = latlng;
+          renderActiveMapTool();
+          return;
+        }
+        if (!state.areaFinished && state.areaPoints.length >= 3) {
+          const first = state.areaPoints[0];
+          const clickPt = map.latLngToContainerPoint(latlng);
+          const firstPt = map.latLngToContainerPoint(first);
+          const closeRadiusPx = 14;
+          if (clickPt.distanceTo(firstPt) <= closeRadiusPx) {
+            finalizeActiveMapTool();
+            return;
+          }
+        }
+        state.areaPoints.push(L.latLng(latlng.lat, latlng.lng));
+        state.areaFinished = false;
+        renderActiveMapTool();
+      }
+    }
+
+    function handleMapToolMouseMove(evt) {
+      if (!isMapToolActive() || !isGpsMainView()) return;
+      if (state.activeMapTool === 'ruler') {
+        if (state.rulerFinished || state.rulerPoints.length === 0) return;
+        state.mapToolPreviewLatLng = evt.latlng;
+        renderActiveMapTool();
+        return;
+      }
+      if (state.activeMapTool === 'area') {
+        if (state.areaFinished || state.areaPoints.length === 0) return;
+        state.mapToolPreviewLatLng = evt.latlng;
+        renderActiveMapTool();
+      }
+    }
+
+    function handleMapToolDoubleClick(evt) {
+      if (!isMapToolActive() || !isGpsMainView()) return;
+      if (state.activeMapTool !== 'ruler' && state.activeMapTool !== 'area') return;
+      if (evt && evt.originalEvent) {
+        L.DomEvent.stop(evt.originalEvent);
+      }
+      finalizeActiveMapTool();
     }
 
     function normalizeYawDeg(yawDeg) {
@@ -1230,9 +1999,13 @@
     }
 
     function setGoalModeUi(enabled) {
+      if (enabled === true && isMapToolActive()) {
+        deactivateMapTool({ clear: false });
+      }
       state.goalMode = enabled === true;
       const btn = document.getElementById('goalModeBtn');
-      btn.textContent = 'Waypoint Mode';
+      btn.title = state.goalMode ? 'modo insercion de waypoints (F) · ON' : 'modo insercion de waypoints (F) · OFF';
+      btn.setAttribute('aria-label', btn.title);
       if (state.goalMode) {
         btn.classList.add('active');
         map.getContainer().style.cursor = 'crosshair';
@@ -1401,6 +2174,38 @@
       ensureMapDraggingEnabled();
     }
 
+    function toggleWaypointInsertionMode() {
+      if (!isGpsMainView()) {
+        setStatus('GPS en minimapa: intercambiá a GPS grande para editar waypoints', false);
+        return;
+      }
+      setGoalModeUi(!state.goalMode);
+    }
+
+    function toggleManualModeRequest() {
+      const nextEnabled = !state.manualControl.enabled;
+      send({ op: 'set_manual_mode', enabled: nextEnabled });
+    }
+
+    function toggleSwapView() {
+      state.primaryView = isGpsMainView() ? 'camera' : 'gps';
+      applyViewMode();
+    }
+
+    function centerMapOnRobot() {
+      if (!state.robotMarker || typeof state.robotMarker.getLatLng !== 'function') {
+        setStatus('Pose del robot no disponible', false);
+        return;
+      }
+      const latLng = state.robotMarker.getLatLng();
+      if (!latLng) {
+        setStatus('Pose del robot no disponible', false);
+        return;
+      }
+      map.setView(latLng, map.getZoom(), { animate: true });
+      setStatus('Vista centrada en robot', true);
+    }
+
     function applyViewMode() {
       const stage = document.getElementById('viewStage');
       const swapBtn = document.getElementById('swapViewBtn');
@@ -1408,7 +2213,10 @@
 
       stage.classList.toggle('mode-camera-main', !gpsMain);
       stage.classList.toggle('mode-gps-main', gpsMain);
-      swapBtn.textContent = gpsMain ? 'Ver cámara grande' : 'Ver GPS grande';
+      swapBtn.textContent = '🔄';
+      swapBtn.title = 'intercambiar camara/mapa (E)';
+      swapBtn.setAttribute('aria-label', swapBtn.title);
+      applyMiniViewerPlacement();
 
       if (!gpsMain && state.goalMode) {
         cancelGoalDraft();
@@ -1417,6 +2225,10 @@
         goalStatusEl.textContent = 'GPS en minimapa: intercambiá a GPS grande para editar waypoints';
         goalStatusEl.className = 'status';
       }
+      if (!gpsMain && isMapToolActive()) {
+        deactivateMapTool({ clear: false });
+      }
+      updateMapToolsToolbarUi();
 
       window.requestAnimationFrame(() => {
         map.invalidateSize(false);
@@ -1552,8 +2364,10 @@
       const manual = state.manualControl || { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0 };
       const enabled = manual.enabled === true;
       const btn = document.getElementById('manualModeBtn');
-      btn.textContent = enabled ? 'Manual: ON' : 'Manual: OFF';
+      btn.textContent = enabled ? 'ON' : 'OFF';
       btn.classList.toggle('manual-on', enabled);
+      btn.title = enabled ? 'modo manual (M) · ON' : 'modo manual (M) · OFF';
+      btn.setAttribute('aria-label', btn.title);
 
       const vx = Number(state.manualCmd.linearX || 0).toFixed(2);
       const wz = Number(state.manualCmd.angularZ || 0).toFixed(2);
@@ -1893,10 +2707,14 @@
           finalizePendingRequestById(String(msg.client_req_id));
         }
         const metaEl = document.getElementById('snapshotMeta');
+        const downloadBtn = document.getElementById('snapshotDownloadBtn');
         if (msg.ok === true && typeof msg.image_b64 === 'string' && msg.image_b64.length > 0) {
           state.lastSnapshot = msg;
           const img = document.getElementById('snapshotImage');
           img.src = `data:${msg.mime || 'image/png'};base64,${msg.image_b64}`;
+          if (downloadBtn) {
+            downloadBtn.disabled = false;
+          }
           const layers = msg.layers || {};
           const activeLayers = Object.entries(layers)
             .filter((entry) => entry[1] === true)
@@ -1908,6 +2726,9 @@
             `png=${msg.image_size_bytes || 0} bytes · stamp=${stamp} · layers=${activeLayers || 'none'}`;
           document.getElementById('snapshotModal').classList.add('show');
           return;
+        }
+        if (downloadBtn && !state.lastSnapshot) {
+          downloadBtn.disabled = true;
         }
         metaEl.textContent = `Snapshot error: ${msg.error || 'unknown error'}`;
         document.getElementById('snapshotModal').classList.add('show');
@@ -2041,6 +2862,7 @@
           map.removeLayer(state.robotMarker);
           state.robotMarker = null;
         }
+        updateMapToolsToolbarUi();
         return;
       }
 
@@ -2057,6 +2879,7 @@
         state.robotMarker.setLatLng(latLng);
         state.robotMarker.setIcon(buildRobotIcon(headingDeg));
       }
+      updateMapToolsToolbarUi();
     }
 
     function newZoneId() {
@@ -2098,6 +2921,7 @@
 
     function renderZoneList(doc) {
       const ul = window.document.getElementById('zoneList');
+      if (!ul) return;
       ul.innerHTML = '';
       const zones = (doc && Array.isArray(doc.zones)) ? doc.zones : [];
       zones.forEach((z) => {
@@ -2218,6 +3042,7 @@
 
     function beginGoalCreateSession(domEvent) {
       if (!state.goalMode || !isGpsMainView()) return;
+      if (isMapToolActive()) return;
       if (!domEvent) return;
       if (state.goalCreateSession.active) return;
       if (domEvent.defaultPrevented) return;
@@ -2288,36 +3113,64 @@
       map.dragging.enable();
     }
 
+    function applyMiniViewerPlacement() {
+      const miniViewerSection = document.getElementById('miniViewerSection');
+      const miniViewerHost = document.getElementById('miniViewerHost');
+      const viewStage = document.getElementById('viewStage');
+      const cameraPane = document.getElementById('cameraPane');
+      const gpsPane = document.getElementById('gpsPane');
+      if (!miniViewerSection || !miniViewerHost || !viewStage || !cameraPane || !gpsPane) return;
+
+      const isNarrow = window.matchMedia('(max-width: 1080px)').matches;
+      if (isNarrow) {
+        miniViewerSection.classList.remove('desktop-active');
+        if (cameraPane.parentElement !== viewStage) {
+          viewStage.appendChild(cameraPane);
+        }
+        if (gpsPane.parentElement !== viewStage) {
+          viewStage.appendChild(gpsPane);
+        }
+        return;
+      }
+
+      miniViewerSection.classList.add('desktop-active');
+      const gpsMain = isGpsMainView();
+      const mainPane = gpsMain ? gpsPane : cameraPane;
+      const miniPane = gpsMain ? cameraPane : gpsPane;
+
+      if (mainPane.parentElement !== viewStage) {
+        viewStage.appendChild(mainPane);
+      }
+      if (miniPane.parentElement !== miniViewerHost) {
+        miniViewerHost.appendChild(miniPane);
+      }
+    }
+
     function relocateTopSections() {
       const telemetrySection = document.getElementById('telemetrySection');
       const cameraSection = document.getElementById('cameraSection');
       const slidersSection = document.getElementById('slidersSection');
+      const miniViewerSection = document.getElementById('miniViewerSection');
       const panelSections = document.getElementById('panelSections');
+      const narrowRightStack = document.getElementById('narrowRightStack');
       const visualCol = document.getElementById('visualCol');
       const visualTopRow = document.getElementById('visualTopRow');
       const viewStage = document.getElementById('viewStage');
-      if (!telemetrySection || !cameraSection || !slidersSection || !panelSections || !visualCol || !visualTopRow || !viewStage) return;
+      if (!telemetrySection || !cameraSection || !slidersSection || !miniViewerSection || !panelSections || !narrowRightStack || !visualCol || !visualTopRow || !viewStage) return;
 
       const isNarrow = window.matchMedia('(max-width: 1080px)').matches;
       if (isNarrow) {
-        if (slidersSection.parentElement !== panelSections) {
-          if (cameraSection.parentElement === panelSections) {
-            panelSections.insertBefore(slidersSection, cameraSection);
-          } else if (telemetrySection.parentElement === panelSections) {
-            panelSections.insertBefore(slidersSection, telemetrySection);
-          } else {
-            panelSections.appendChild(slidersSection);
-          }
+        if (narrowRightStack.parentElement !== panelSections) {
+          panelSections.appendChild(narrowRightStack);
         }
-        if (cameraSection.parentElement !== panelSections) {
-          if (telemetrySection.parentElement === panelSections) {
-            panelSections.insertBefore(cameraSection, telemetrySection);
-          } else {
-            panelSections.appendChild(cameraSection);
-          }
-        }
+        // Narrow-only swap: Sliders | Camera (left to right).
+        narrowRightStack.appendChild(slidersSection);
+        narrowRightStack.appendChild(cameraSection);
         if (telemetrySection.parentElement !== panelSections) {
           panelSections.appendChild(telemetrySection);
+        }
+        if (miniViewerSection.parentElement !== panelSections) {
+          panelSections.appendChild(miniViewerSection);
         }
       } else {
         if (telemetrySection.parentElement !== visualTopRow) {
@@ -2329,7 +3182,14 @@
         if (cameraSection.parentElement !== visualTopRow) {
           visualTopRow.appendChild(cameraSection);
         }
+        if (miniViewerSection.parentElement !== panelSections) {
+          panelSections.appendChild(miniViewerSection);
+        }
       }
+      applyMiniViewerPlacement();
+      window.requestAnimationFrame(() => {
+        map.invalidateSize(false);
+      });
     }
 
     function pushLayersToServer() {
@@ -2340,6 +3200,13 @@
     }
 
     map.on(L.Draw.Event.CREATED, (e) => {
+      if (state.zoneEditingBlocked) {
+        if (e && e.layer && map.hasLayer(e.layer)) {
+          map.removeLayer(e.layer);
+        }
+        setStatus('Exit map tool mode to edit zones', false);
+        return;
+      }
       if (!isGpsMainView()) {
         setStatus('GPS en minimapa: intercambiá a GPS grande para editar zonas', false);
         return;
@@ -2354,6 +3221,10 @@
     });
 
     map.on(L.Draw.Event.EDITED, (e) => {
+      if (state.zoneEditingBlocked) {
+        setStatus('Exit map tool mode to edit zones', false);
+        return;
+      }
       if (!isGpsMainView()) {
         setStatus('GPS en minimapa: intercambiá a GPS grande para editar zonas', false);
         return;
@@ -2365,6 +3236,10 @@
     });
 
     map.on(L.Draw.Event.DELETED, (e) => {
+      if (state.zoneEditingBlocked) {
+        setStatus('Exit map tool mode to edit zones', false);
+        return;
+      }
       if (!isGpsMainView()) {
         setStatus('GPS en minimapa: intercambiá a GPS grande para editar zonas', false);
         return;
@@ -2376,6 +3251,10 @@
     });
 
     drawnItems.on('click', (evt) => {
+      if (state.zoneEditingBlocked) {
+        setStatus('Exit map tool mode to edit zones', false);
+        return;
+      }
       if (!isGpsMainView()) {
         setStatus('GPS en minimapa: intercambiá a GPS grande para editar zonas', false);
         return;
@@ -2394,6 +3273,10 @@
       }
     });
 
+    map.on('click', handleMapToolClick);
+    map.on('mousemove', handleMapToolMouseMove);
+    map.on('dblclick', handleMapToolDoubleClick);
+
     document.getElementById('connectBtn').addEventListener('click', connectWs);
     const connectOnEnter = (event) => {
       if (event.key !== 'Enter') return;
@@ -2404,7 +3287,6 @@
     document.getElementById('wsPort').addEventListener('keydown', connectOnEnter);
     document.getElementById('disconnectBtn').addEventListener('click', disconnectWs);
     document.getElementById('refreshBtn').addEventListener('click', () => send({ op: 'get_state' }));
-    document.getElementById('pushBtn').addEventListener('click', pushLayersToServer);
     document.getElementById('saveBtn').addEventListener('click', pushLayersToServer);
     document.getElementById('loadBtn').addEventListener('click', () => send({ op: 'load_zones_file' }));
     document.getElementById('clearBtn').addEventListener('click', () => {
@@ -2415,13 +3297,29 @@
       drawnItems.clearLayers();
       pushLayersToServer();
     });
+    document.getElementById('mapToolRulerBtn').addEventListener('click', () => {
+      activateMapTool('ruler');
+    });
+    document.getElementById('mapToolAreaBtn').addEventListener('click', () => {
+      activateMapTool('area');
+    });
+    document.getElementById('mapToolInspectBtn').addEventListener('click', () => {
+      activateMapTool('inspect');
+    });
+    document.getElementById('mapToolCenterRobotBtn').addEventListener('click', () => {
+      centerMapOnRobot();
+    });
+    document.getElementById('mapToolClearBtn').addEventListener('click', () => {
+      clearMapToolData();
+      renderActiveMapTool();
+      setStatus('Map tool data cleared', true);
+    });
+    document.getElementById('mapToolCloseBtn').addEventListener('click', () => {
+      deactivateMapTool({ clear: false });
+    });
 
     document.getElementById('goalModeBtn').addEventListener('click', () => {
-      if (!isGpsMainView()) {
-        setStatus('GPS en minimapa: intercambiá a GPS grande para editar waypoints', false);
-        return;
-      }
-      setGoalModeUi(!state.goalMode);
+      toggleWaypointInsertionMode();
     });
 
     document.getElementById('sendGoalsBtn').addEventListener('click', () => {
@@ -2467,21 +3365,50 @@
     });
 
     document.getElementById('manualModeBtn').addEventListener('click', () => {
-      const nextEnabled = !state.manualControl.enabled;
-      send({ op: 'set_manual_mode', enabled: nextEnabled });
+      toggleManualModeRequest();
     });
 
     document.getElementById('manualLinearSlider').addEventListener('input', updateManualSliderLabels);
     document.getElementById('manualAngularSlider').addEventListener('input', updateManualSliderLabels);
     document.getElementById('swapViewBtn').addEventListener('click', () => {
-      state.primaryView = isGpsMainView() ? 'camera' : 'gps';
-      applyViewMode();
+      toggleSwapView();
     });
 
     window.addEventListener('keydown', (event) => {
+      const code = event.code;
+      const snapshotModal = document.getElementById('snapshotModal');
+      if (code === 'Escape' && snapshotModal && snapshotModal.classList.contains('show')) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          downloadLastSnapshot();
+        }
+        closeSnapshotModal();
+        return;
+      }
+
       if (isTextInputFocused()) return;
 
-      const code = event.code;
+      if (isMapToolActive()) {
+        if (code === 'Escape') {
+          event.preventDefault();
+          clearMapToolData();
+          renderActiveMapTool();
+          setStatus('Map tool action canceled', false);
+          return;
+        }
+        if (code === 'Backspace') {
+          if (removeLastMapToolVertex()) {
+            event.preventDefault();
+            return;
+          }
+        }
+        if (code === 'Enter' || code === 'NumpadEnter') {
+          if (finalizeActiveMapTool()) {
+            event.preventDefault();
+            return;
+          }
+        }
+      }
       if (code === 'Escape' && state.goalMode) {
         event.preventDefault();
         cancelGoalDraft();
@@ -2506,6 +3433,26 @@
       }
 
       if (!event.repeat) {
+        if (code === 'KeyE') {
+          event.preventDefault();
+          toggleSwapView();
+          return;
+        }
+        if (code === 'KeyM') {
+          event.preventDefault();
+          toggleManualModeRequest();
+          return;
+        }
+        if (code === 'KeyF') {
+          event.preventDefault();
+          toggleWaypointInsertionMode();
+          return;
+        }
+        if (code === 'KeyQ') {
+          event.preventDefault();
+          send({ op: 'get_nav_snapshot' });
+          return;
+        }
         if (code === 'Minus' || code === 'NumpadSubtract') {
           event.preventDefault();
           send({ op: 'camera_zoom_toggle' });
@@ -2577,11 +3524,14 @@
       send({ op: 'camera_zoom_toggle' });
     });
     document.getElementById('snapshotCloseBtn').addEventListener('click', () => {
-      document.getElementById('snapshotModal').classList.remove('show');
+      closeSnapshotModal();
+    });
+    document.getElementById('snapshotDownloadBtn').addEventListener('click', () => {
+      downloadLastSnapshot();
     });
     document.getElementById('snapshotModal').addEventListener('click', (e) => {
       if (e.target && e.target.id === 'snapshotModal') {
-        document.getElementById('snapshotModal').classList.remove('show');
+        closeSnapshotModal();
       }
     });
 
@@ -2614,7 +3564,11 @@
     });
     window.addEventListener('resize', relocateTopSections);
 
-    document.getElementById('cameraFrame').src = CAMERA_IFRAME_URL;
+    const cameraFrameEl = document.getElementById('cameraFrame');
+    cameraFrameEl.addEventListener('focus', () => {
+      cameraFrameEl.blur();
+    });
+    cameraFrameEl.src = CAMERA_IFRAME_URL;
     initializeTrackedButtonsUi();
     setConnectButtonConnecting(false);
     setConnectionState(false);
@@ -2627,6 +3581,8 @@
     updateGoalButtonsState();
     updateWaypointStatus();
     renderGoalWaypoints();
+    updateMapToolsToolbarUi();
+    renderActiveMapTool();
   </script>
 </body>
 </html>
