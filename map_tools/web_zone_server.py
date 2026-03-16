@@ -138,6 +138,9 @@ class WebZoneServerNode(Node):
             "last_cmd_age_s": None,
         }
         self._goal_active = False
+        self._nav_result_status = 0
+        self._nav_result_text = "idle"
+        self._nav_result_event_id = 0
         self._camera_status = {
             "ok": False,
             "error": "camera status unavailable",
@@ -232,6 +235,9 @@ class WebZoneServerNode(Node):
                 "cmd_vel_safe": dict(self._cmd_vel_safe),
                 "manual_control": dict(self._manual_control),
                 "goal_active": bool(self._goal_active),
+                "nav_result_status": int(self._nav_result_status),
+                "nav_result_text": str(self._nav_result_text),
+                "nav_result_event_id": int(self._nav_result_event_id),
                 "camera_status": dict(self._camera_status),
             }
 
@@ -239,10 +245,18 @@ class WebZoneServerNode(Node):
         with self._lock:
             cmd_vel_safe = dict(self._cmd_vel_safe)
             manual_control = dict(self._manual_control)
+            goal_active = bool(self._goal_active)
+            nav_result_status = int(self._nav_result_status)
+            nav_result_text = str(self._nav_result_text)
+            nav_result_event_id = int(self._nav_result_event_id)
         return {
             "op": "nav_telemetry",
             "cmd_vel_safe": cmd_vel_safe,
             "manual_control": manual_control,
+            "goal_active": goal_active,
+            "nav_result_status": nav_result_status,
+            "nav_result_text": nav_result_text,
+            "nav_result_event_id": nav_result_event_id,
         }
 
     async def _broadcast(self, payload: Dict[str, Any]) -> None:
@@ -346,6 +360,9 @@ class WebZoneServerNode(Node):
                 "angular_z": float(msg.cmd_vel_angular_z),
             }
             self._goal_active = bool(msg.goal_active)
+            self._nav_result_status = int(getattr(msg, "nav_result_status", 0))
+            self._nav_result_text = str(getattr(msg, "nav_result_text", ""))
+            self._nav_result_event_id = int(getattr(msg, "nav_result_event_id", 0))
 
             last_cmd_age = None
             if self._manual_cmd_last_monotonic is not None:

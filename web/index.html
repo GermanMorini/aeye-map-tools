@@ -1072,6 +1072,13 @@
       lastWaypointDragEndMs: 0,
       lastSnapshot: null,
       cmdVelSafe: null,
+      navTelemetry: {
+        goalActive: false,
+        navResultStatus: 0,
+        navResultText: 'idle',
+        navResultEventId: 0,
+        initialized: false
+      },
       cameraStatus: { ok: false, error: 'camera status unavailable', last_command: 'none', zoom_in: false },
       cameraStreamConnected: false,
       cameraStreamPending: 'idle',
@@ -1114,6 +1121,15 @@
 
     const MANUAL_LOOP_HZ = 20.0;
     const MANUAL_EMERGENCY_BRAKE_PCT = 100;
+    const NAV_GOAL_STATUS = {
+      UNKNOWN: 0,
+      ACCEPTED: 1,
+      EXECUTING: 2,
+      CANCELING: 3,
+      SUCCEEDED: 4,
+      CANCELED: 5,
+      ABORTED: 6
+    };
     const CAMERA_STREAM_PROBE_TIMEOUT_MS = 3000;
     const CAMERA_STREAM_LOAD_TIMEOUT_MS = 7000;
     const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
@@ -2578,6 +2594,60 @@
         cmdEl.className = 'status';
       }
 
+      const goalStatusEl = document.getElementById('goalStatus');
+      const prevGoalActive = state.navTelemetry.goalActive === true;
+      const prevResultEventId = Number(state.navTelemetry.navResultEventId || 0);
+      const hasGoalActive = payload && typeof payload.goal_active === 'boolean';
+      const hasResultStatus = payload && Number.isFinite(Number(payload.nav_result_status));
+      const hasResultText = payload && typeof payload.nav_result_text === 'string';
+      const hasResultEventId = payload && Number.isFinite(Number(payload.nav_result_event_id));
+
+      if (hasGoalActive) {
+        state.navTelemetry.goalActive = payload.goal_active === true;
+      }
+      if (hasResultStatus) {
+        state.navTelemetry.navResultStatus = Number(payload.nav_result_status);
+      }
+      if (hasResultText) {
+        state.navTelemetry.navResultText = String(payload.nav_result_text || '');
+      }
+      if (hasResultEventId) {
+        state.navTelemetry.navResultEventId = Number(payload.nav_result_event_id);
+      }
+
+      const goalActive = state.navTelemetry.goalActive === true;
+      const resultStatus = Number(state.navTelemetry.navResultStatus || 0);
+      const resultText = String(state.navTelemetry.navResultText || '');
+      const resultEventChanged = Number(state.navTelemetry.navResultEventId || 0) > prevResultEventId;
+      const initialized = state.navTelemetry.initialized === true;
+      if (!initialized) {
+        state.navTelemetry.initialized = true;
+        if (goalActive) {
+          goalStatusEl.textContent = 'Navigating...';
+          goalStatusEl.className = 'status good';
+        }
+      } else if (goalActive && !prevGoalActive) {
+        goalStatusEl.textContent = 'Navigating...';
+        goalStatusEl.className = 'status good';
+      } else if ((!goalActive && prevGoalActive) || (!goalActive && resultEventChanged)) {
+        if (resultStatus === NAV_GOAL_STATUS.SUCCEEDED) {
+          goalStatusEl.textContent = 'Goal reached';
+          goalStatusEl.className = 'status good';
+        } else if (resultStatus === NAV_GOAL_STATUS.CANCELED) {
+          goalStatusEl.textContent = 'Goal cancelled';
+          goalStatusEl.className = 'status';
+        } else if (resultStatus === NAV_GOAL_STATUS.ABORTED) {
+          goalStatusEl.textContent = `Goal failed: ${resultText || 'aborted'}`;
+          goalStatusEl.className = 'status bad';
+        } else if (resultStatus === NAV_GOAL_STATUS.CANCELING) {
+          goalStatusEl.textContent = 'Goal canceling...';
+          goalStatusEl.className = 'status';
+        } else {
+          goalStatusEl.textContent = resultText ? `Navigation ended: ${resultText}` : 'Navigation ended';
+          goalStatusEl.className = 'status';
+        }
+      }
+
       if (payload && payload.manual_control) {
         syncManualControlFromServer(payload.manual_control);
       }
@@ -2638,6 +2708,14 @@
       state.manualBrakeHeld = false;
       state.manualCmd.linearX = 0.0;
       state.manualCmd.angularZ = 0.0;
+    }
+
+    function resetNavTelemetryState() {
+      state.navTelemetry.goalActive = false;
+      state.navTelemetry.navResultStatus = 0;
+      state.navTelemetry.navResultText = 'idle';
+      state.navTelemetry.navResultEventId = 0;
+      state.navTelemetry.initialized = false;
     }
 
     function sendManualCmd(linearX, angularZ, brakePct = 0) {
@@ -2861,6 +2939,7 @@
         setStatus('Disconnected', false);
         stopManualLoop();
         resetManualLocalState();
+        resetNavTelemetryState();
         state.manualControl.enabled = false;
         renderManualStatus();
         updateCameraStatusUi({ ok: false, error: 'disconnected', last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
@@ -2915,6 +2994,7 @@
       clearAllPendingRequests();
       stopManualLoop();
       resetManualLocalState();
+      resetNavTelemetryState();
       state.manualControl.enabled = false;
       renderManualStatus();
     }
@@ -2934,7 +3014,13 @@
         const maskReady = msg.mask_ready === true;
         const maskReadyText = maskReady ? 'mask ready' : 'mask not ready';
         setStatus(`state updated (${maskReadyText}, source=${maskSource})`, maskReady);
-        updateNavTelemetry({ cmd_vel_safe: msg.cmd_vel_safe });
+        updateNavTelemetry({
+          cmd_vel_safe: msg.cmd_vel_safe,
+          goal_active: msg.goal_active,
+          nav_result_status: msg.nav_result_status,
+          nav_result_text: msg.nav_result_text,
+          nav_result_event_id: msg.nav_result_event_id
+        });
         syncManualControlFromServer(msg.manual_control || null);
         if (msg.camera_status) {
           updateCameraStatusUi(msg.camera_status);
