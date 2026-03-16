@@ -845,6 +845,19 @@ class WebSocketApi:
     def __init__(self, node: WebZoneServerNode):
         self.node = node
 
+    async def _reload_zones_on_connect(self) -> None:
+        try:
+            ok, err = await asyncio.to_thread(self.node.reload_zones_from_disk)
+            if not ok:
+                if err:
+                    self.node.get_logger().warning(
+                        f"zones reload on WS connect failed: {err}"
+                    )
+                return
+            await self.node._broadcast(self.node.snapshot_state())
+        except Exception as exc:
+            self.node.get_logger().warning(f"zones reload on WS connect crashed: {exc}")
+
     def _parse_waypoints_from_message(
         self, msg: Dict[str, Any]
     ) -> Tuple[Optional[List[Dict[str, float]]], bool, str]:
@@ -940,6 +953,11 @@ class WebSocketApi:
         self.node.add_client(ws)
         try:
             await self._send_json(ws, self.node.snapshot_state())
+            connect_reload_task = asyncio.create_task(self._reload_zones_on_connect())
+            pending_tasks.add(connect_reload_task)
+            connect_reload_task.add_done_callback(
+                lambda done: pending_tasks.discard(done)
+            )
             async for raw in ws:
                 task = asyncio.create_task(self._handle_message_safe(ws, raw))
                 pending_tasks.add(task)
