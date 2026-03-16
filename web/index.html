@@ -167,6 +167,22 @@
     .panel-section.mini-viewer.desktop-active {
       display: block;
     }
+    .camera-stream-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    button.camera-stream-toggle.camera-connect {
+      background: linear-gradient(180deg, #1f7ae0, #145fc0);
+      border-color: #0e468d;
+      color: #ffffff;
+    }
+    button.camera-stream-toggle.camera-disconnect {
+      background: linear-gradient(180deg, #d93629, #a82015);
+      border-color: #7e150d;
+      color: #ffffff;
+    }
     .mini-viewer-host {
       position: relative;
       width: 100%;
@@ -361,6 +377,26 @@
       z-index: 10;
       border: 0;
       border-radius: 0;
+    }
+    .camera-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(4, 13, 22, 0.62);
+      color: #ffffff;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      text-transform: lowercase;
+      z-index: 30;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 150ms ease;
+    }
+    .camera-overlay.visible {
+      opacity: 1;
     }
     #cameraFrame {
       width: 100%;
@@ -921,6 +957,15 @@
         </section>
         <section id="miniViewerSection" class="panel-section mini-viewer">
           <div id="miniViewerHost" class="mini-viewer-host"></div>
+          <div class="camera-stream-controls">
+            <button id="cameraStreamToggleBtn" class="camera-stream-toggle camera-connect" type="button">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M17 10.5V7a2 2 0 0 0-2-2H3A2 2 0 0 0 1 7v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.5l6 4v-11z"/></svg>
+              </span>
+              <span class="btn-label">Connect</span>
+            </button>
+            <div id="cameraStreamState" class="status">camera: disconnected</div>
+          </div>
         </section>
       </div>
     </div>
@@ -929,6 +974,7 @@
       <div id="viewStage" class="mode-camera-main">
         <div id="cameraPane" class="view-pane">
           <iframe id="cameraFrame" title="Camera feed" loading="lazy" tabindex="-1"></iframe>
+          <div id="cameraDisconnectedOverlay" class="camera-overlay visible">camara desconectada</div>
         </div>
         <div id="gpsPane" class="view-pane">
           <div id="map"></div>
@@ -1027,6 +1073,10 @@
       lastSnapshot: null,
       cmdVelSafe: null,
       cameraStatus: { ok: false, error: 'camera status unavailable', last_command: 'none', zoom_in: false },
+      cameraStreamConnected: false,
+      cameraStreamPending: 'idle',
+      cameraStreamSettleTimer: null,
+      cameraStreamSeq: 0,
       cameraArrowKeys: { up: false, down: false, left: false, right: false },
       cameraArrowTimer: null,
       manualControl: { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0, last_cmd_age_s: null },
@@ -1063,6 +1113,8 @@
 
     const MANUAL_LOOP_HZ = 20.0;
     const MANUAL_EMERGENCY_BRAKE_PCT = 100;
+    const CAMERA_STREAM_PROBE_TIMEOUT_MS = 3000;
+    const CAMERA_STREAM_LOAD_TIMEOUT_MS = 7000;
     const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
     const REQUEST_TIMEOUT_OVERRIDES_MS = {
       set_goal_ll: 15000
@@ -1197,6 +1249,180 @@
       if (!btn) return;
       setButtonLabelText('connectBtn', connecting ? 'Connecting...' : 'Connect');
       btn.disabled = connecting === true;
+    }
+
+    function clearCameraStreamSettleTimer() {
+      if (state.cameraStreamSettleTimer) {
+        window.clearTimeout(state.cameraStreamSettleTimer);
+        state.cameraStreamSettleTimer = null;
+      }
+    }
+
+    async function probeCameraStreamAvailability() {
+      let controller = null;
+      let timeoutId = null;
+      try {
+        if (typeof AbortController !== 'undefined') {
+          controller = new AbortController();
+          timeoutId = window.setTimeout(() => {
+            controller.abort();
+          }, CAMERA_STREAM_PROBE_TIMEOUT_MS);
+        }
+        await fetch(CAMERA_IFRAME_URL, {
+          method: 'GET',
+          mode: 'no-cors',
+          cache: 'no-store',
+          signal: controller ? controller.signal : undefined
+        });
+        return [true, ''];
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          return [false, 'probe timeout'];
+        }
+        return [false, 'probe failed'];
+      } finally {
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+      }
+    }
+
+    function renderCameraStreamUi() {
+      const toggleBtn = document.getElementById('cameraStreamToggleBtn');
+      const streamStatus = document.getElementById('cameraStreamState');
+      const overlay = document.getElementById('cameraDisconnectedOverlay');
+      if (!toggleBtn || !streamStatus || !overlay) return;
+
+      const pending = state.cameraStreamPending;
+      const connected = state.cameraStreamConnected === true;
+
+      let label = 'Connect';
+      let statusText = 'camera: disconnected';
+      let className = 'status bad';
+      let overlayText = 'camara desconectada';
+      let overlayVisible = true;
+
+      if (pending === 'connecting') {
+        label = 'Connecting...';
+        statusText = 'camera: connecting';
+        className = 'status';
+        overlayText = 'conectando camara...';
+      } else if (pending === 'disconnecting') {
+        label = 'Disconnecting...';
+        statusText = 'camera: disconnecting';
+        className = 'status';
+        overlayText = 'desconectando camara...';
+      } else if (connected) {
+        label = 'Disconnect';
+        statusText = 'camera: connected';
+        className = 'status good';
+        overlayVisible = false;
+      }
+
+      setButtonLabelText('cameraStreamToggleBtn', label);
+      toggleBtn.disabled = pending !== 'idle';
+      toggleBtn.classList.toggle('camera-connect', pending === 'connecting' || (!connected && pending === 'idle'));
+      toggleBtn.classList.toggle('camera-disconnect', pending === 'disconnecting' || (connected && pending === 'idle'));
+
+      streamStatus.textContent = statusText;
+      streamStatus.className = className;
+      overlay.textContent = overlayText;
+      overlay.classList.toggle('visible', overlayVisible);
+    }
+
+    function finalizeCameraStreamConnect(success, errorText = '') {
+      if (state.cameraStreamPending !== 'connecting') return;
+      state.cameraStreamPending = 'idle';
+      state.cameraStreamConnected = success === true;
+      clearCameraStreamSettleTimer();
+      if (!state.cameraStreamConnected) {
+        const frame = document.getElementById('cameraFrame');
+        if (frame) frame.src = 'about:blank';
+      }
+      renderCameraStreamUi();
+      if (success) {
+        setStatus('Camera connected', true);
+      } else {
+        const suffix = errorText ? ` (${errorText})` : '';
+        setStatus(`Camera connection failed${suffix}`, false);
+      }
+    }
+
+    async function connectCameraStream() {
+      if (state.cameraStreamPending !== 'idle' || state.cameraStreamConnected === true) return;
+      const frame = document.getElementById('cameraFrame');
+      if (!frame) return;
+
+      const streamSeq = state.cameraStreamSeq + 1;
+      state.cameraStreamSeq = streamSeq;
+      state.cameraStreamPending = 'connecting';
+      renderCameraStreamUi();
+
+      const [probeOk, probeErr] = await probeCameraStreamAvailability();
+      if (streamSeq !== state.cameraStreamSeq || state.cameraStreamPending !== 'connecting') {
+        return;
+      }
+      if (!probeOk) {
+        finalizeCameraStreamConnect(false, probeErr);
+        return;
+      }
+
+      const cleanup = () => {
+        frame.removeEventListener('load', onLoad);
+        frame.removeEventListener('error', onError);
+        clearCameraStreamSettleTimer();
+      };
+      const onLoad = () => {
+        if (streamSeq !== state.cameraStreamSeq) return;
+        cleanup();
+        finalizeCameraStreamConnect(true);
+      };
+      const onError = () => {
+        if (streamSeq !== state.cameraStreamSeq) return;
+        cleanup();
+        finalizeCameraStreamConnect(false, 'load error');
+      };
+      frame.addEventListener('load', onLoad, { once: true });
+      frame.addEventListener('error', onError, { once: true });
+
+      const sep = CAMERA_IFRAME_URL.includes('?') ? '&' : '?';
+      frame.src = `${CAMERA_IFRAME_URL}${sep}_ts=${Date.now()}`;
+      state.cameraStreamSettleTimer = window.setTimeout(() => {
+        if (streamSeq !== state.cameraStreamSeq) return;
+        cleanup();
+        finalizeCameraStreamConnect(false, 'stream timeout');
+      }, CAMERA_STREAM_LOAD_TIMEOUT_MS);
+    }
+
+    function disconnectCameraStream(options = {}) {
+      const announce = options.announce !== false;
+      if (state.cameraStreamPending === 'disconnecting') return;
+      const frame = document.getElementById('cameraFrame');
+      if (!frame) return;
+
+      state.cameraStreamSeq += 1;
+      clearCameraStreamSettleTimer();
+      state.cameraStreamPending = 'disconnecting';
+      renderCameraStreamUi();
+
+      window.setTimeout(() => {
+        frame.src = 'about:blank';
+        state.cameraStreamConnected = false;
+        state.cameraStreamPending = 'idle';
+        renderCameraStreamUi();
+        if (announce) {
+          setStatus('Camera disconnected', false);
+        }
+      }, 140);
+    }
+
+    function toggleCameraStream() {
+      if (state.cameraStreamPending !== 'idle') return;
+      if (state.cameraStreamConnected) {
+        disconnectCameraStream();
+      } else {
+        connectCameraStream();
+      }
     }
 
     function initializeTrackedButtonsUi() {
@@ -3679,6 +3905,9 @@
     document.getElementById('snapshotDownloadBtn').addEventListener('click', () => {
       downloadLastSnapshot();
     });
+    document.getElementById('cameraStreamToggleBtn').addEventListener('click', () => {
+      toggleCameraStream();
+    });
     document.getElementById('snapshotModal').addEventListener('click', (e) => {
       if (e.target && e.target.id === 'snapshotModal') {
         closeSnapshotModal();
@@ -3718,10 +3947,11 @@
     cameraFrameEl.addEventListener('focus', () => {
       cameraFrameEl.blur();
     });
-    cameraFrameEl.src = CAMERA_IFRAME_URL;
+    cameraFrameEl.src = 'about:blank';
     initializeTrackedButtonsUi();
     setConnectButtonConnecting(false);
     setConnectionState(false);
+    renderCameraStreamUi();
     relocateTopSections();
     applyViewMode();
     updateManualSliderLabels();
