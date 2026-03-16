@@ -1081,6 +1081,7 @@
       cameraArrowTimer: null,
       manualControl: { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0, last_cmd_age_s: null },
       manualKeys: { w: false, a: false, s: false, d: false },
+      manualBrakeHeld: false,
       manualCmd: { linearX: 0.0, angularZ: 0.0 },
       manualLoopTimer: null,
       nextClientReqId: 1,
@@ -2634,6 +2635,7 @@
       state.manualKeys.a = false;
       state.manualKeys.s = false;
       state.manualKeys.d = false;
+      state.manualBrakeHeld = false;
       state.manualCmd.linearX = 0.0;
       state.manualCmd.angularZ = 0.0;
     }
@@ -2649,32 +2651,30 @@
       });
     }
 
-    function manualEmergencyStop() {
-      state.manualCmd.linearX = 0.0;
-      state.manualCmd.angularZ = 0.0;
-      sendManualCmd(0.0, 0.0, MANUAL_EMERGENCY_BRAKE_PCT);
-      renderManualStatus();
-    }
-
     function manualControlTick() {
       if (!state.manualControl.enabled) return;
 
-      const linearMax = Number(document.getElementById('manualLinearSlider').value || 1.2);
-      const angularMax = Number(document.getElementById('manualAngularSlider').value || 0.4);
-
-      const forward = state.manualKeys.w;
-      const reverse = state.manualKeys.s;
-      const left = state.manualKeys.a;
-      const right = state.manualKeys.d;
-
       let targetLinear = 0.0;
-      if (forward && !reverse) targetLinear = linearMax;
-      if (reverse && !forward) targetLinear = -linearMax;
-
       let targetAngular = 0.0;
-      if (left && !right) targetAngular = angularMax;
-      if (right && !left) targetAngular = -angularMax;
-      if (targetLinear < 0.0) targetAngular = -targetAngular;
+      let targetBrake = 0;
+
+      if (state.manualBrakeHeld) {
+        targetBrake = MANUAL_EMERGENCY_BRAKE_PCT;
+      } else {
+        const linearMax = Number(document.getElementById('manualLinearSlider').value || 1.2);
+        const angularMax = Number(document.getElementById('manualAngularSlider').value || 0.4);
+
+        const forward = state.manualKeys.w;
+        const reverse = state.manualKeys.s;
+        const left = state.manualKeys.a;
+        const right = state.manualKeys.d;
+
+        if (forward && !reverse) targetLinear = linearMax;
+        if (reverse && !forward) targetLinear = -linearMax;
+        if (left && !right) targetAngular = angularMax;
+        if (right && !left) targetAngular = -angularMax;
+        if (targetLinear < 0.0) targetAngular = -targetAngular;
+      }
 
       state.manualCmd.linearX = targetLinear;
       state.manualCmd.angularZ = targetAngular;
@@ -2682,7 +2682,7 @@
       if (Math.abs(state.manualCmd.linearX) < 1e-3) state.manualCmd.linearX = 0.0;
       if (Math.abs(state.manualCmd.angularZ) < 1e-3) state.manualCmd.angularZ = 0.0;
 
-      sendManualCmd(state.manualCmd.linearX, state.manualCmd.angularZ);
+      sendManualCmd(state.manualCmd.linearX, state.manualCmd.angularZ, targetBrake);
       renderManualStatus();
     }
 
@@ -3840,7 +3840,8 @@
 
       if (code === 'Space') {
         event.preventDefault();
-        manualEmergencyStop();
+        state.manualBrakeHeld = true;
+        renderManualStatus();
         return;
       }
 
@@ -3866,9 +3867,7 @@
       if (code === 'KeyA') state.manualKeys.a = false;
       if (code === 'KeyS') state.manualKeys.s = false;
       if (code === 'KeyD') state.manualKeys.d = false;
-      if (code === 'Space') {
-        manualEmergencyStop();
-      }
+      if (code === 'Space') state.manualBrakeHeld = false;
       renderManualStatus();
     });
 
