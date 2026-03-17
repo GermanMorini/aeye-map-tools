@@ -167,22 +167,6 @@
     .panel-section.mini-viewer.desktop-active {
       display: block;
     }
-    .camera-stream-controls {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-top: 8px;
-    }
-    button.camera-stream-toggle.camera-connect {
-      background: linear-gradient(180deg, #1f7ae0, #145fc0);
-      border-color: #0e468d;
-      color: #ffffff;
-    }
-    button.camera-stream-toggle.camera-disconnect {
-      background: linear-gradient(180deg, #d93629, #a82015);
-      border-color: #7e150d;
-      color: #ffffff;
-    }
     .mini-viewer-host {
       position: relative;
       width: 100%;
@@ -378,26 +362,6 @@
       border: 0;
       border-radius: 0;
     }
-    .camera-overlay {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(4, 13, 22, 0.62);
-      color: #ffffff;
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: 0.2px;
-      text-transform: lowercase;
-      z-index: 30;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 150ms ease;
-    }
-    .camera-overlay.visible {
-      opacity: 1;
-    }
     #cameraFrame {
       width: 100%;
       height: 100%;
@@ -513,6 +477,51 @@
       font-size: 20px;
       line-height: 1;
       backdrop-filter: blur(2px);
+    }
+    #followBtn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 1300;
+      width: auto;
+      min-width: 104px;
+      min-height: 34px;
+      padding: 6px 12px;
+      backdrop-filter: blur(2px);
+    }
+    #gpsHud {
+      position: absolute;
+      left: 62px;
+      bottom: 12px;
+      z-index: 1250;
+      min-width: 184px;
+      max-width: min(240px, calc(100% - 74px));
+      padding: 8px 10px;
+      border: 1px solid rgba(51, 65, 85, 0.92);
+      border-radius: 10px;
+      background: rgba(2, 6, 23, 0.76);
+      color: #e5e7eb;
+      font-family: "Consolas", "SFMono-Regular", "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      pointer-events: none;
+      box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
+      backdrop-filter: blur(4px);
+    }
+    .hud-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .hud-label {
+      color: #38bdf8;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .hud-value {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
     }
     #viewStage.mode-camera-main #cameraPane {
       inset: 0;
@@ -646,19 +655,29 @@
       transform-origin: 50% 50%;
       filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.55));
     }
-    .robot-icon .robot-arrow {
-      position: absolute;
-      top: 1px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 16px;
-      height: 32px;
-      background: linear-gradient(180deg, #55cbff 0%, #0ea5e9 42%, #0284c7 100%);
-      clip-path: polygon(50% 0%, 100% 66%, 66% 62%, 50% 100%, 34% 62%, 0% 66%);
-      filter: drop-shadow(0 0 2px rgba(2, 6, 23, 0.75));
+    .robot-icon svg {
+      width: 36px;
+      height: 36px;
+      overflow: visible;
     }
-    .robot-icon.no-heading .robot-arrow {
-      opacity: 0.55;
+    .robot-icon .robot-ring {
+      fill: rgba(14, 165, 233, 0.24);
+      stroke: #38bdf8;
+      stroke-width: 1.5;
+    }
+    .robot-icon .robot-body {
+      fill: #0ea5e9;
+      stroke: rgba(255, 255, 255, 0.95);
+      stroke-width: 1;
+      stroke-linejoin: round;
+    }
+    .robot-icon .robot-core {
+      fill: #e0f2fe;
+      stroke: rgba(2, 6, 23, 0.55);
+      stroke-width: 0.8;
+    }
+    .robot-icon.no-heading svg {
+      opacity: 0.62;
     }
     .ptz-grid {
       display: grid;
@@ -775,6 +794,20 @@
       #swapViewBtn {
         bottom: 10px;
         left: 10px;
+      }
+      #followBtn {
+        top: 10px;
+        right: 10px;
+        min-width: 92px;
+        padding: 5px 10px;
+      }
+      #gpsHud {
+        left: 56px;
+        bottom: 10px;
+        min-width: 164px;
+        max-width: calc(100% - 66px);
+        padding: 7px 9px;
+        font-size: 11px;
       }
       #viewStage.mode-camera-main #gpsPane,
       #viewStage.mode-gps-main #cameraPane {
@@ -924,6 +957,27 @@
             </label>
             <input id="manualAngularSlider" type="range" min="0.1" max="0.4" step="0.01" value="0.40" />
           </div>
+          <div class="stack" style="margin-top:14px;">
+            <label>
+              Joystick linear sensitivity: <span id="joystickLinearValue">1.00</span>x
+            </label>
+            <input id="joystickLinearSlider" type="range" min="0.1" max="2.0" step="0.1" value="1.0" />
+            <label>
+              Joystick angular sensitivity: <span id="joystickAngularValue">1.00</span>x
+            </label>
+            <input id="joystickAngularSlider" type="range" min="0.1" max="2.0" step="0.1" value="1.0" />
+            <div class="row">
+              <button id="applyJoystickSensitivityBtn" class="secondary" type="button">
+                Apply joystick sensitivity
+              </button>
+              <button id="refreshJoystickConfigBtn" class="secondary" type="button">
+                Read joystick values
+              </button>
+            </div>
+            <div id="joystickSensitivityStatus" class="status">
+              Joystick sensitivity: unavailable
+            </div>
+          </div>
         </section>
 
         <section id="cameraSection" class="panel-section camera">
@@ -952,20 +1006,12 @@
             <div id="waypointStatus" class="status">Waypoints: 0</div>
             <div id="cmdVelSafeStatus" class="status">cmd_vel_safe: n/a</div>
             <div id="manualStatus" class="status">Manual: OFF · keys=- · vx_cmd=0.00 · wz_cmd=0.00</div>
+            <div id="joystickStatus" class="status">Joystick: unavailable</div>
             <div id="cameraStatus" class="status">camera: n/a</div>
           </div>
         </section>
         <section id="miniViewerSection" class="panel-section mini-viewer">
           <div id="miniViewerHost" class="mini-viewer-host"></div>
-          <div class="camera-stream-controls">
-            <button id="cameraStreamToggleBtn" class="camera-stream-toggle camera-connect" type="button">
-              <span class="btn-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M17 10.5V7a2 2 0 0 0-2-2H3A2 2 0 0 0 1 7v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.5l6 4v-11z"/></svg>
-              </span>
-              <span class="btn-label">Connect</span>
-            </button>
-            <div id="cameraStreamState" class="status">camera: disconnected</div>
-          </div>
         </section>
       </div>
     </div>
@@ -974,7 +1020,6 @@
       <div id="viewStage" class="mode-camera-main">
         <div id="cameraPane" class="view-pane">
           <iframe id="cameraFrame" title="Camera feed" loading="lazy" tabindex="-1"></iframe>
-          <div id="cameraDisconnectedOverlay" class="camera-overlay visible">camara desconectada</div>
         </div>
         <div id="gpsPane" class="view-pane">
           <div id="map"></div>
@@ -987,6 +1032,12 @@
               <button id="mapToolCenterRobotBtn" class="secondary" type="button" title="centrar vista en robot" aria-label="centrar vista en robot">🎯</button>
               <button id="mapToolCloseBtn" class="secondary" type="button" title="Close: exit map tool mode" aria-label="Close map tools">❌</button>
             </div>
+          </div>
+          <button id="followBtn" class="secondary active" type="button" title="seguir robot" aria-label="seguir robot">Follow: ON</button>
+          <div id="gpsHud">
+            <div class="hud-row"><span class="hud-label">LAT</span><span id="hudLat" class="hud-value">-</span></div>
+            <div class="hud-row"><span class="hud-label">LON</span><span id="hudLon" class="hud-value">-</span></div>
+            <div class="hud-row"><span class="hud-label">HDG</span><span id="hudHdg" class="hud-value">-</span></div>
           </div>
         </div>
         <button id="swapViewBtn" class="secondary" type="button" title="intercambiar camara/mapa (E)" aria-label="intercambiar camara/mapa (E)">🔄</button>
@@ -1062,6 +1113,12 @@
       frameId: 'map',
       lastZones: [],
       robotMarker: null,
+      robotTrail: [],
+      trailPolyline: null,
+      robotHeadingDeg: null,
+      robotPose: null,
+      lastHeadingSampleLatLng: null,
+      followRobot: true,
       primaryView: 'camera',
       goalMode: false,
       goalWaypoints: [],
@@ -1072,23 +1129,17 @@
       lastWaypointDragEndMs: 0,
       lastSnapshot: null,
       cmdVelSafe: null,
-      navTelemetry: {
-        goalActive: false,
-        navResultStatus: 0,
-        navResultText: 'idle',
-        navResultEventId: 0,
-        initialized: false
-      },
       cameraStatus: { ok: false, error: 'camera status unavailable', last_command: 'none', zoom_in: false },
-      cameraStreamConnected: false,
-      cameraStreamPending: 'idle',
-      cameraStreamSettleTimer: null,
-      cameraStreamSeq: 0,
       cameraArrowKeys: { up: false, down: false, left: false, right: false },
       cameraArrowTimer: null,
       manualControl: { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0, last_cmd_age_s: null },
+      joystickConfig: {
+        available: false,
+        linear_sensitivity: 1.0,
+        angular_sensitivity: 1.0,
+        error: 'joystick node unavailable'
+      },
       manualKeys: { w: false, a: false, s: false, d: false },
-      manualBrakeHeld: false,
       manualCmd: { linearX: 0.0, angularZ: 0.0 },
       manualLoopTimer: null,
       nextClientReqId: 1,
@@ -1121,17 +1172,10 @@
 
     const MANUAL_LOOP_HZ = 20.0;
     const MANUAL_EMERGENCY_BRAKE_PCT = 100;
-    const NAV_GOAL_STATUS = {
-      UNKNOWN: 0,
-      ACCEPTED: 1,
-      EXECUTING: 2,
-      CANCELING: 3,
-      SUCCEEDED: 4,
-      CANCELED: 5,
-      ABORTED: 6
-    };
-    const CAMERA_STREAM_PROBE_TIMEOUT_MS = 3000;
-    const CAMERA_STREAM_LOAD_TIMEOUT_MS = 7000;
+    const ROBOT_TRAIL_MAX_POINTS = 500;
+    const ROBOT_TRAIL_MIN_DISTANCE_M = 0.75;
+    const ROBOT_HEADING_MIN_DISTANCE_M = 0.75;
+    const ROBOT_FOLLOW_RECENTER_DISTANCE_M = 1.5;
     const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
     const REQUEST_TIMEOUT_OVERRIDES_MS = {
       set_goal_ll: 15000
@@ -1174,6 +1218,11 @@
       },
       set_manual_mode: {
         buttons: {}
+      },
+      set_joystick_sensitivity: {
+        buttons: {
+          applyJoystickSensitivityBtn: { pending: 'Applying' }
+        }
       }
     };
 
@@ -1266,180 +1315,6 @@
       if (!btn) return;
       setButtonLabelText('connectBtn', connecting ? 'Connecting...' : 'Connect');
       btn.disabled = connecting === true;
-    }
-
-    function clearCameraStreamSettleTimer() {
-      if (state.cameraStreamSettleTimer) {
-        window.clearTimeout(state.cameraStreamSettleTimer);
-        state.cameraStreamSettleTimer = null;
-      }
-    }
-
-    async function probeCameraStreamAvailability() {
-      let controller = null;
-      let timeoutId = null;
-      try {
-        if (typeof AbortController !== 'undefined') {
-          controller = new AbortController();
-          timeoutId = window.setTimeout(() => {
-            controller.abort();
-          }, CAMERA_STREAM_PROBE_TIMEOUT_MS);
-        }
-        await fetch(CAMERA_IFRAME_URL, {
-          method: 'GET',
-          mode: 'no-cors',
-          cache: 'no-store',
-          signal: controller ? controller.signal : undefined
-        });
-        return [true, ''];
-      } catch (err) {
-        if (err && err.name === 'AbortError') {
-          return [false, 'probe timeout'];
-        }
-        return [false, 'probe failed'];
-      } finally {
-        if (timeoutId) {
-          window.clearTimeout(timeoutId);
-        }
-      }
-    }
-
-    function renderCameraStreamUi() {
-      const toggleBtn = document.getElementById('cameraStreamToggleBtn');
-      const streamStatus = document.getElementById('cameraStreamState');
-      const overlay = document.getElementById('cameraDisconnectedOverlay');
-      if (!toggleBtn || !streamStatus || !overlay) return;
-
-      const pending = state.cameraStreamPending;
-      const connected = state.cameraStreamConnected === true;
-
-      let label = 'Connect';
-      let statusText = 'camera: disconnected';
-      let className = 'status bad';
-      let overlayText = 'camara desconectada';
-      let overlayVisible = true;
-
-      if (pending === 'connecting') {
-        label = 'Connecting...';
-        statusText = 'camera: connecting';
-        className = 'status';
-        overlayText = 'conectando camara...';
-      } else if (pending === 'disconnecting') {
-        label = 'Disconnecting...';
-        statusText = 'camera: disconnecting';
-        className = 'status';
-        overlayText = 'desconectando camara...';
-      } else if (connected) {
-        label = 'Disconnect';
-        statusText = 'camera: connected';
-        className = 'status good';
-        overlayVisible = false;
-      }
-
-      setButtonLabelText('cameraStreamToggleBtn', label);
-      toggleBtn.disabled = pending !== 'idle';
-      toggleBtn.classList.toggle('camera-connect', pending === 'connecting' || (!connected && pending === 'idle'));
-      toggleBtn.classList.toggle('camera-disconnect', pending === 'disconnecting' || (connected && pending === 'idle'));
-
-      streamStatus.textContent = statusText;
-      streamStatus.className = className;
-      overlay.textContent = overlayText;
-      overlay.classList.toggle('visible', overlayVisible);
-    }
-
-    function finalizeCameraStreamConnect(success, errorText = '') {
-      if (state.cameraStreamPending !== 'connecting') return;
-      state.cameraStreamPending = 'idle';
-      state.cameraStreamConnected = success === true;
-      clearCameraStreamSettleTimer();
-      if (!state.cameraStreamConnected) {
-        const frame = document.getElementById('cameraFrame');
-        if (frame) frame.src = 'about:blank';
-      }
-      renderCameraStreamUi();
-      if (success) {
-        setStatus('Camera connected', true);
-      } else {
-        const suffix = errorText ? ` (${errorText})` : '';
-        setStatus(`Camera connection failed${suffix}`, false);
-      }
-    }
-
-    async function connectCameraStream() {
-      if (state.cameraStreamPending !== 'idle' || state.cameraStreamConnected === true) return;
-      const frame = document.getElementById('cameraFrame');
-      if (!frame) return;
-
-      const streamSeq = state.cameraStreamSeq + 1;
-      state.cameraStreamSeq = streamSeq;
-      state.cameraStreamPending = 'connecting';
-      renderCameraStreamUi();
-
-      const [probeOk, probeErr] = await probeCameraStreamAvailability();
-      if (streamSeq !== state.cameraStreamSeq || state.cameraStreamPending !== 'connecting') {
-        return;
-      }
-      if (!probeOk) {
-        finalizeCameraStreamConnect(false, probeErr);
-        return;
-      }
-
-      const cleanup = () => {
-        frame.removeEventListener('load', onLoad);
-        frame.removeEventListener('error', onError);
-        clearCameraStreamSettleTimer();
-      };
-      const onLoad = () => {
-        if (streamSeq !== state.cameraStreamSeq) return;
-        cleanup();
-        finalizeCameraStreamConnect(true);
-      };
-      const onError = () => {
-        if (streamSeq !== state.cameraStreamSeq) return;
-        cleanup();
-        finalizeCameraStreamConnect(false, 'load error');
-      };
-      frame.addEventListener('load', onLoad, { once: true });
-      frame.addEventListener('error', onError, { once: true });
-
-      const sep = CAMERA_IFRAME_URL.includes('?') ? '&' : '?';
-      frame.src = `${CAMERA_IFRAME_URL}${sep}_ts=${Date.now()}`;
-      state.cameraStreamSettleTimer = window.setTimeout(() => {
-        if (streamSeq !== state.cameraStreamSeq) return;
-        cleanup();
-        finalizeCameraStreamConnect(false, 'stream timeout');
-      }, CAMERA_STREAM_LOAD_TIMEOUT_MS);
-    }
-
-    function disconnectCameraStream(options = {}) {
-      const announce = options.announce !== false;
-      if (state.cameraStreamPending === 'disconnecting') return;
-      const frame = document.getElementById('cameraFrame');
-      if (!frame) return;
-
-      state.cameraStreamSeq += 1;
-      clearCameraStreamSettleTimer();
-      state.cameraStreamPending = 'disconnecting';
-      renderCameraStreamUi();
-
-      window.setTimeout(() => {
-        frame.src = 'about:blank';
-        state.cameraStreamConnected = false;
-        state.cameraStreamPending = 'idle';
-        renderCameraStreamUi();
-        if (announce) {
-          setStatus('Camera disconnected', false);
-        }
-      }, 140);
-    }
-
-    function toggleCameraStream() {
-      if (state.cameraStreamPending !== 'idle') return;
-      if (state.cameraStreamConnected) {
-        disconnectCameraStream();
-      } else {
-        connectCameraStream();
-      }
     }
 
     function initializeTrackedButtonsUi() {
@@ -2132,11 +2007,124 @@
         className: '',
         html:
           `<div class="${classes}" style="transform: rotate(${cssRotationDeg}deg);">` +
-            '<div class="robot-arrow"></div>' +
+            '<svg viewBox="0 0 40 40" aria-hidden="true">' +
+              '<circle class="robot-ring" cx="20" cy="20" r="13"></circle>' +
+              '<path class="robot-body" d="M20 5 L27.5 27.5 L20 23.5 L12.5 27.5 Z"></path>' +
+              '<circle class="robot-core" cx="20" cy="20" r="3.2"></circle>' +
+            '</svg>' +
           '</div>',
         iconSize: [40, 40],
         iconAnchor: [20, 20]
       });
+    }
+
+    function normalizePoseLatLng(pose) {
+      if (!pose || !Number.isFinite(Number(pose.lat)) || !Number.isFinite(Number(pose.lon))) {
+        return null;
+      }
+      return L.latLng(Number(pose.lat), Number(pose.lon));
+    }
+
+    function getPoseHeadingDeg(pose) {
+      if (!pose || typeof pose !== 'object') return null;
+      const raw = pose.heading_deg ?? pose.yaw_deg;
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return null;
+      return normalizeYawDeg(value);
+    }
+
+    function inferRobotHeadingDeg(latLng) {
+      const anchor = state.lastHeadingSampleLatLng;
+      if (!anchor) {
+        state.lastHeadingSampleLatLng = L.latLng(latLng.lat, latLng.lng);
+        return state.robotHeadingDeg;
+      }
+      if (map.distance(anchor, latLng) < ROBOT_HEADING_MIN_DISTANCE_M) {
+        return state.robotHeadingDeg;
+      }
+      state.lastHeadingSampleLatLng = L.latLng(latLng.lat, latLng.lng);
+      return yawDegFromLatLng(anchor, latLng);
+    }
+
+    function updateGpsHud(pose, headingDeg) {
+      const latEl = document.getElementById('hudLat');
+      const lonEl = document.getElementById('hudLon');
+      const hdgEl = document.getElementById('hudHdg');
+      if (!latEl || !lonEl || !hdgEl) return;
+      if (!pose || !Number.isFinite(Number(pose.lat)) || !Number.isFinite(Number(pose.lon))) {
+        latEl.textContent = '-';
+        lonEl.textContent = '-';
+        hdgEl.textContent = '-';
+        return;
+      }
+      latEl.textContent = Number(pose.lat).toFixed(7);
+      lonEl.textContent = Number(pose.lon).toFixed(7);
+      hdgEl.textContent = Number.isFinite(Number(headingDeg))
+        ? `${normalizeYawDeg(Number(headingDeg)).toFixed(1)}°`
+        : '-';
+    }
+
+    function updateFollowButtonUi() {
+      const btn = document.getElementById('followBtn');
+      if (!btn) return;
+      const enabled = state.followRobot === true;
+      btn.textContent = enabled ? 'Follow: ON' : 'Follow: OFF';
+      btn.title = enabled ? 'seguir robot · ON' : 'seguir robot · OFF';
+      btn.setAttribute('aria-label', btn.title);
+      btn.classList.toggle('active', enabled);
+    }
+
+    function setFollowRobot(enabled, options = {}) {
+      state.followRobot = enabled === true;
+      updateFollowButtonUi();
+      if (state.followRobot && options.center !== false && state.robotPose) {
+        const latLng = normalizePoseLatLng(state.robotPose);
+        if (latLng) {
+          map.panTo(latLng, { animate: true, duration: 0.35, noMoveStart: true });
+        }
+      }
+      if (!options.silent) {
+        setStatus(state.followRobot ? 'Follow robot enabled' : 'Follow robot disabled', state.followRobot);
+      }
+    }
+
+    function disableFollowRobot(reason = 'Follow robot disabled by map interaction') {
+      if (state.followRobot !== true) return;
+      setFollowRobot(false, { center: false, silent: true });
+      setStatus(reason, false);
+    }
+
+    function updateRobotTrail(latLng) {
+      const lastPoint = state.robotTrail.length > 0
+        ? state.robotTrail[state.robotTrail.length - 1]
+        : null;
+      if (!lastPoint || map.distance(lastPoint, latLng) >= ROBOT_TRAIL_MIN_DISTANCE_M) {
+        state.robotTrail.push(L.latLng(latLng.lat, latLng.lng));
+        if (state.robotTrail.length > ROBOT_TRAIL_MAX_POINTS) {
+          state.robotTrail.shift();
+        }
+      }
+
+      if (!state.trailPolyline) {
+        state.trailPolyline = L.polyline(state.robotTrail, {
+          color: '#0ea5e9',
+          weight: 2,
+          opacity: 0.68,
+          dashArray: '6 6',
+          lineCap: 'round',
+          lineJoin: 'round'
+        }).addTo(map);
+      } else {
+        state.trailPolyline.setLatLngs(state.robotTrail);
+      }
+    }
+
+    function followRobotIfNeeded(latLng) {
+      if (state.followRobot !== true) return;
+      const center = map.getCenter();
+      if (!center || map.distance(center, latLng) >= ROBOT_FOLLOW_RECENTER_DISTANCE_M) {
+        map.panTo(latLng, { animate: true, duration: 0.35, noMoveStart: true });
+      }
     }
 
     function updateWaypointStatus(text = null, ok = null) {
@@ -2594,60 +2582,6 @@
         cmdEl.className = 'status';
       }
 
-      const goalStatusEl = document.getElementById('goalStatus');
-      const prevGoalActive = state.navTelemetry.goalActive === true;
-      const prevResultEventId = Number(state.navTelemetry.navResultEventId || 0);
-      const hasGoalActive = payload && typeof payload.goal_active === 'boolean';
-      const hasResultStatus = payload && Number.isFinite(Number(payload.nav_result_status));
-      const hasResultText = payload && typeof payload.nav_result_text === 'string';
-      const hasResultEventId = payload && Number.isFinite(Number(payload.nav_result_event_id));
-
-      if (hasGoalActive) {
-        state.navTelemetry.goalActive = payload.goal_active === true;
-      }
-      if (hasResultStatus) {
-        state.navTelemetry.navResultStatus = Number(payload.nav_result_status);
-      }
-      if (hasResultText) {
-        state.navTelemetry.navResultText = String(payload.nav_result_text || '');
-      }
-      if (hasResultEventId) {
-        state.navTelemetry.navResultEventId = Number(payload.nav_result_event_id);
-      }
-
-      const goalActive = state.navTelemetry.goalActive === true;
-      const resultStatus = Number(state.navTelemetry.navResultStatus || 0);
-      const resultText = String(state.navTelemetry.navResultText || '');
-      const resultEventChanged = Number(state.navTelemetry.navResultEventId || 0) > prevResultEventId;
-      const initialized = state.navTelemetry.initialized === true;
-      if (!initialized) {
-        state.navTelemetry.initialized = true;
-        if (goalActive) {
-          goalStatusEl.textContent = 'Navigating...';
-          goalStatusEl.className = 'status good';
-        }
-      } else if (goalActive && !prevGoalActive) {
-        goalStatusEl.textContent = 'Navigating...';
-        goalStatusEl.className = 'status good';
-      } else if ((!goalActive && prevGoalActive) || (!goalActive && resultEventChanged)) {
-        if (resultStatus === NAV_GOAL_STATUS.SUCCEEDED) {
-          goalStatusEl.textContent = 'Goal reached';
-          goalStatusEl.className = 'status good';
-        } else if (resultStatus === NAV_GOAL_STATUS.CANCELED) {
-          goalStatusEl.textContent = 'Goal cancelled';
-          goalStatusEl.className = 'status';
-        } else if (resultStatus === NAV_GOAL_STATUS.ABORTED) {
-          goalStatusEl.textContent = `Goal failed: ${resultText || 'aborted'}`;
-          goalStatusEl.className = 'status bad';
-        } else if (resultStatus === NAV_GOAL_STATUS.CANCELING) {
-          goalStatusEl.textContent = 'Goal canceling...';
-          goalStatusEl.className = 'status';
-        } else {
-          goalStatusEl.textContent = resultText ? `Navigation ended: ${resultText}` : 'Navigation ended';
-          goalStatusEl.className = 'status';
-        }
-      }
-
       if (payload && payload.manual_control) {
         syncManualControlFromServer(payload.manual_control);
       }
@@ -2675,6 +2609,76 @@
       const angular = Number(document.getElementById('manualAngularSlider').value || 0.4);
       document.getElementById('manualLinearValue').textContent = linear.toFixed(2);
       document.getElementById('manualAngularValue').textContent = angular.toFixed(2);
+    }
+
+    function updateJoystickSliderLabels() {
+      const linear = Number(document.getElementById('joystickLinearSlider').value || 1.0);
+      const angular = Number(document.getElementById('joystickAngularSlider').value || 1.0);
+      document.getElementById('joystickLinearValue').textContent = linear.toFixed(2);
+      document.getElementById('joystickAngularValue').textContent = angular.toFixed(2);
+    }
+
+    function renderJoystickStatus(text, ok = null) {
+      const detailEl = document.getElementById('joystickSensitivityStatus');
+      const compactEl = document.getElementById('joystickStatus');
+      const className = ok === true ? 'status good' : (ok === false ? 'status bad' : 'status');
+      if (detailEl) {
+        detailEl.textContent = text;
+        detailEl.className = className;
+      }
+      if (compactEl) {
+        compactEl.textContent = text;
+        compactEl.className = className;
+      }
+    }
+
+    function syncJoystickConfig(config) {
+      const normalized = {
+        available: false,
+        linear_sensitivity: 1.0,
+        angular_sensitivity: 1.0,
+        error: ''
+      };
+      if (config && typeof config === 'object') {
+        normalized.available = config.available === true;
+        if (Number.isFinite(Number(config.linear_sensitivity))) {
+          normalized.linear_sensitivity = Number(config.linear_sensitivity);
+        }
+        if (Number.isFinite(Number(config.angular_sensitivity))) {
+          normalized.angular_sensitivity = Number(config.angular_sensitivity);
+        }
+        normalized.error = String(config.error || '');
+      }
+
+      state.joystickConfig = normalized;
+      document.getElementById('joystickLinearSlider').value = normalized.linear_sensitivity.toFixed(1);
+      document.getElementById('joystickAngularSlider').value = normalized.angular_sensitivity.toFixed(1);
+      updateJoystickSliderLabels();
+
+      const applyBtn = document.getElementById('applyJoystickSensitivityBtn');
+      if (applyBtn) {
+        applyBtn.disabled = normalized.available !== true;
+      }
+
+      if (normalized.available) {
+        renderJoystickStatus(
+          `Joystick: linear=${normalized.linear_sensitivity.toFixed(2)}x · angular=${normalized.angular_sensitivity.toFixed(2)}x`,
+          true
+        );
+      } else {
+        const reason = normalized.error || 'joystick node unavailable';
+        renderJoystickStatus(`Joystick: ${reason}`, false);
+      }
+    }
+
+    function applyJoystickSensitivity() {
+      const linear = Number(document.getElementById('joystickLinearSlider').value || 1.0);
+      const angular = Number(document.getElementById('joystickAngularSlider').value || 1.0);
+      send({
+        op: 'set_joystick_sensitivity',
+        linear_sensitivity: linear,
+        angular_sensitivity: angular
+      });
     }
 
     function renderManualStatus() {
@@ -2705,17 +2709,8 @@
       state.manualKeys.a = false;
       state.manualKeys.s = false;
       state.manualKeys.d = false;
-      state.manualBrakeHeld = false;
       state.manualCmd.linearX = 0.0;
       state.manualCmd.angularZ = 0.0;
-    }
-
-    function resetNavTelemetryState() {
-      state.navTelemetry.goalActive = false;
-      state.navTelemetry.navResultStatus = 0;
-      state.navTelemetry.navResultText = 'idle';
-      state.navTelemetry.navResultEventId = 0;
-      state.navTelemetry.initialized = false;
     }
 
     function sendManualCmd(linearX, angularZ, brakePct = 0) {
@@ -2729,30 +2724,32 @@
       });
     }
 
+    function manualEmergencyStop() {
+      state.manualCmd.linearX = 0.0;
+      state.manualCmd.angularZ = 0.0;
+      sendManualCmd(0.0, 0.0, MANUAL_EMERGENCY_BRAKE_PCT);
+      renderManualStatus();
+    }
+
     function manualControlTick() {
       if (!state.manualControl.enabled) return;
 
+      const linearMax = Number(document.getElementById('manualLinearSlider').value || 1.2);
+      const angularMax = Number(document.getElementById('manualAngularSlider').value || 0.4);
+
+      const forward = state.manualKeys.w;
+      const reverse = state.manualKeys.s;
+      const left = state.manualKeys.a;
+      const right = state.manualKeys.d;
+
       let targetLinear = 0.0;
+      if (forward && !reverse) targetLinear = linearMax;
+      if (reverse && !forward) targetLinear = -linearMax;
+
       let targetAngular = 0.0;
-      let targetBrake = 0;
-
-      if (state.manualBrakeHeld) {
-        targetBrake = MANUAL_EMERGENCY_BRAKE_PCT;
-      } else {
-        const linearMax = Number(document.getElementById('manualLinearSlider').value || 1.2);
-        const angularMax = Number(document.getElementById('manualAngularSlider').value || 0.4);
-
-        const forward = state.manualKeys.w;
-        const reverse = state.manualKeys.s;
-        const left = state.manualKeys.a;
-        const right = state.manualKeys.d;
-
-        if (forward && !reverse) targetLinear = linearMax;
-        if (reverse && !forward) targetLinear = -linearMax;
-        if (left && !right) targetAngular = angularMax;
-        if (right && !left) targetAngular = -angularMax;
-        if (targetLinear < 0.0) targetAngular = -targetAngular;
-      }
+      if (left && !right) targetAngular = angularMax;
+      if (right && !left) targetAngular = -angularMax;
+      if (targetLinear < 0.0) targetAngular = -targetAngular;
 
       state.manualCmd.linearX = targetLinear;
       state.manualCmd.angularZ = targetAngular;
@@ -2760,7 +2757,7 @@
       if (Math.abs(state.manualCmd.linearX) < 1e-3) state.manualCmd.linearX = 0.0;
       if (Math.abs(state.manualCmd.angularZ) < 1e-3) state.manualCmd.angularZ = 0.0;
 
-      sendManualCmd(state.manualCmd.linearX, state.manualCmd.angularZ, targetBrake);
+      sendManualCmd(state.manualCmd.linearX, state.manualCmd.angularZ);
       renderManualStatus();
     }
 
@@ -2922,6 +2919,7 @@
         setConnectButtonConnecting(false);
         setStatus(`Connected to ${url}`, true);
         send({ op: 'get_state' }, { track: false });
+        send({ op: 'get_joystick_config' }, { track: false });
         send({ op: 'get_camera_status' }, { track: false });
       };
 
@@ -2939,9 +2937,9 @@
         setStatus('Disconnected', false);
         stopManualLoop();
         resetManualLocalState();
-        resetNavTelemetryState();
         state.manualControl.enabled = false;
         renderManualStatus();
+        syncJoystickConfig(Object.assign({}, state.joystickConfig, { available: false, error: 'disconnected' }));
         updateCameraStatusUi({ ok: false, error: 'disconnected', last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
         if (!userRequested && wasConnected) {
           showConnectionLostDialog();
@@ -2994,9 +2992,9 @@
       clearAllPendingRequests();
       stopManualLoop();
       resetManualLocalState();
-      resetNavTelemetryState();
       state.manualControl.enabled = false;
       renderManualStatus();
+      syncJoystickConfig(Object.assign({}, state.joystickConfig, { available: false, error: 'disconnected' }));
     }
 
     function handleServerMessage(msg) {
@@ -3014,14 +3012,9 @@
         const maskReady = msg.mask_ready === true;
         const maskReadyText = maskReady ? 'mask ready' : 'mask not ready';
         setStatus(`state updated (${maskReadyText}, source=${maskSource})`, maskReady);
-        updateNavTelemetry({
-          cmd_vel_safe: msg.cmd_vel_safe,
-          goal_active: msg.goal_active,
-          nav_result_status: msg.nav_result_status,
-          nav_result_text: msg.nav_result_text,
-          nav_result_event_id: msg.nav_result_event_id
-        });
+        updateNavTelemetry({ cmd_vel_safe: msg.cmd_vel_safe });
         syncManualControlFromServer(msg.manual_control || null);
+        syncJoystickConfig(msg.joystick_config || null);
         if (msg.camera_status) {
           updateCameraStatusUi(msg.camera_status);
         }
@@ -3036,6 +3029,14 @@
       if (msg.op === 'nav_telemetry') {
         updateNavTelemetry(msg);
         syncManualControlFromServer(msg.manual_control || null);
+        return;
+      }
+
+      if (msg.op === 'joystick_config') {
+        if (msg.client_req_id != null) {
+          finalizePendingRequestById(String(msg.client_req_id));
+        }
+        syncJoystickConfig(msg);
         return;
       }
 
@@ -3149,6 +3150,15 @@
             goalStatusEl.textContent = `Manual command failed: ${msg.error || 'error'}`;
             goalStatusEl.className = 'status bad';
           }
+        } else if (msg.request === 'set_joystick_sensitivity') {
+          if (msg.ok) {
+            if (msg.config && typeof msg.config === 'object') {
+              syncJoystickConfig(msg.config);
+            }
+            renderJoystickStatus('Joystick sensitivity updated', true);
+          } else {
+            renderJoystickStatus(`Joystick: ${msg.error || 'sensitivity update failed'}`, false);
+          }
         } else if (msg.request === 'save_waypoints_file') {
           if (msg.ok) {
             const count = Number(msg.waypoint_count || state.goalWaypoints.length || 0);
@@ -3193,29 +3203,43 @@
     }
 
     function updateRobotPose(pose) {
-      const hasPose = pose && Number.isFinite(pose.lat) && Number.isFinite(pose.lon);
+      const latLng = normalizePoseLatLng(pose);
+      const hasPose = !!latLng;
       if (!hasPose) {
+        state.robotPose = null;
+        state.robotHeadingDeg = null;
+        state.lastHeadingSampleLatLng = null;
         if (state.robotMarker) {
           map.removeLayer(state.robotMarker);
           state.robotMarker = null;
         }
+        updateGpsHud(null, null);
         updateMapToolsToolbarUi();
         return;
       }
 
-      const latLng = [pose.lat, pose.lon];
-      const headingDeg = (pose && Number.isFinite(Number(pose.heading_deg)))
-        ? Number(pose.heading_deg)
-        : null;
+      state.robotPose = {
+        lat: Number(latLng.lat),
+        lon: Number(latLng.lng)
+      };
+      const poseHeadingDeg = getPoseHeadingDeg(pose);
+      const headingDeg = poseHeadingDeg ?? inferRobotHeadingDeg(latLng);
+      state.robotHeadingDeg = Number.isFinite(Number(headingDeg))
+        ? normalizeYawDeg(Number(headingDeg))
+        : state.robotHeadingDeg;
+      updateRobotTrail(latLng);
+
       if (!state.robotMarker) {
         state.robotMarker = L.marker(latLng, {
-          icon: buildRobotIcon(headingDeg),
+          icon: buildRobotIcon(state.robotHeadingDeg),
           interactive: false
         }).addTo(map);
       } else {
         state.robotMarker.setLatLng(latLng);
-        state.robotMarker.setIcon(buildRobotIcon(headingDeg));
+        state.robotMarker.setIcon(buildRobotIcon(state.robotHeadingDeg));
       }
+      updateGpsHud(state.robotPose, state.robotHeadingDeg);
+      followRobotIfNeeded(latLng);
       updateMapToolsToolbarUi();
     }
 
@@ -3748,7 +3772,10 @@
     document.getElementById('wsHost').addEventListener('keydown', connectOnEnter);
     document.getElementById('wsPort').addEventListener('keydown', connectOnEnter);
     document.getElementById('disconnectBtn').addEventListener('click', disconnectWs);
-    document.getElementById('refreshBtn').addEventListener('click', () => send({ op: 'get_state' }));
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+      send({ op: 'get_state' });
+      send({ op: 'get_joystick_config' }, { track: false });
+    });
     document.getElementById('saveBtn').addEventListener('click', pushLayersToServer);
     document.getElementById('loadBtn').addEventListener('click', () => send({ op: 'load_zones_file' }));
     document.getElementById('clearBtn').addEventListener('click', () => {
@@ -3828,6 +3855,17 @@
 
     document.getElementById('manualLinearSlider').addEventListener('input', updateManualSliderLabels);
     document.getElementById('manualAngularSlider').addEventListener('input', updateManualSliderLabels);
+    document.getElementById('joystickLinearSlider').addEventListener('input', updateJoystickSliderLabels);
+    document.getElementById('joystickAngularSlider').addEventListener('input', updateJoystickSliderLabels);
+    document.getElementById('followBtn').addEventListener('click', () => {
+      setFollowRobot(!(state.followRobot === true), { center: true });
+    });
+    document.getElementById('applyJoystickSensitivityBtn').addEventListener('click', () => {
+      applyJoystickSensitivity();
+    });
+    document.getElementById('refreshJoystickConfigBtn').addEventListener('click', () => {
+      send({ op: 'get_joystick_config' }, { track: false });
+    });
     document.getElementById('swapViewBtn').addEventListener('click', () => {
       toggleSwapView();
     });
@@ -3926,8 +3964,7 @@
 
       if (code === 'Space') {
         event.preventDefault();
-        state.manualBrakeHeld = true;
-        renderManualStatus();
+        manualEmergencyStop();
         return;
       }
 
@@ -3953,7 +3990,9 @@
       if (code === 'KeyA') state.manualKeys.a = false;
       if (code === 'KeyS') state.manualKeys.s = false;
       if (code === 'KeyD') state.manualKeys.d = false;
-      if (code === 'Space') state.manualBrakeHeld = false;
+      if (code === 'Space') {
+        manualEmergencyStop();
+      }
       renderManualStatus();
     });
 
@@ -3990,9 +4029,6 @@
     document.getElementById('snapshotDownloadBtn').addEventListener('click', () => {
       downloadLastSnapshot();
     });
-    document.getElementById('cameraStreamToggleBtn').addEventListener('click', () => {
-      toggleCameraStream();
-    });
     document.getElementById('snapshotModal').addEventListener('click', (e) => {
       if (e.target && e.target.id === 'snapshotModal') {
         closeSnapshotModal();
@@ -4000,6 +4036,12 @@
     });
 
     const mapContainer = map.getContainer();
+    map.on('dragstart', () => {
+      disableFollowRobot('Follow robot paused: map drag');
+    });
+    map.on('zoomstart', () => {
+      disableFollowRobot('Follow robot paused: map zoom');
+    });
     mapContainer.addEventListener('pointerdown', beginGoalCreateSession, { passive: false });
     mapContainer.addEventListener('pointermove', updateGoalCreateSession, { passive: false });
     mapContainer.addEventListener('pointerup', completeGoalCreateSession, { passive: false });
@@ -4032,21 +4074,24 @@
     cameraFrameEl.addEventListener('focus', () => {
       cameraFrameEl.blur();
     });
-    cameraFrameEl.src = 'about:blank';
+    cameraFrameEl.src = CAMERA_IFRAME_URL;
     initializeTrackedButtonsUi();
     setConnectButtonConnecting(false);
     setConnectionState(false);
-    renderCameraStreamUi();
     relocateTopSections();
     applyViewMode();
     updateManualSliderLabels();
+    updateJoystickSliderLabels();
     renderManualStatus();
+    syncJoystickConfig(state.joystickConfig);
     updateCameraStatusUi(state.cameraStatus);
     renderZoneList({ zones: state.lastZones });
     updateGoalButtonsState();
     updateWaypointStatus();
     renderGoalWaypoints();
     updateMapToolsToolbarUi();
+    updateFollowButtonUi();
+    updateGpsHud(null, null);
     renderActiveMapTool();
   </script>
 </body>
