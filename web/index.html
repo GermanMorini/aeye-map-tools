@@ -15,6 +15,7 @@
       --muted: #2f4358;
       --accent: #005ec4;
       --good: #0f7a3c;
+      --warn: #b54708;
       --bad: #b42318;
     }
     * { box-sizing: border-box; }
@@ -159,6 +160,67 @@
       border-radius: 0;
       background: transparent;
       padding: 0;
+    }
+    .telemetry-feed-grid {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .telemetry-feed {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: #f8fbfe;
+    }
+    .telemetry-feed h3 {
+      margin: 0 0 6px 0;
+      font-size: 13px;
+    }
+    .telemetry-feed-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 180px;
+      overflow: auto;
+    }
+    .telemetry-feed-item {
+      border-radius: 8px;
+      border: 1px solid #d5e0ea;
+      background: #ffffff;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 12px;
+    }
+    .telemetry-feed-item.warn {
+      border-color: rgba(181, 71, 8, 0.35);
+      background: #fff7ed;
+    }
+    .telemetry-feed-item.bad {
+      border-color: rgba(180, 35, 24, 0.35);
+      background: #fef3f2;
+    }
+    .telemetry-feed-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+    .telemetry-feed-code {
+      font-weight: 700;
+      color: var(--text);
+    }
+    .telemetry-feed-empty {
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
     }
     .panel-section.mini-viewer {
       display: none;
@@ -354,6 +416,7 @@
     }
     .status { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
     .status.good { color: var(--good); }
+    .status.warn { color: var(--warn); }
     .status.bad { color: var(--bad); }
     #viewStage {
       position: relative;
@@ -738,6 +801,63 @@
       min-height: 34px;
       padding: 6px 10px;
     }
+    .menu-grid {
+      display: grid;
+      gap: 12px;
+    }
+    .menu-section {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #ffffff;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .menu-section h4 {
+      margin: 0;
+      font-size: 14px;
+    }
+    .menu-section p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .debug-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .debug-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fbfe;
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .debug-card strong {
+      font-size: 12px;
+    }
+    .debug-card code {
+      word-break: break-all;
+      white-space: pre-wrap;
+    }
+    .debug-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      align-items: end;
+    }
+    .debug-actions label {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .debug-actions select {
+      width: 100%;
+    }
     #snapshotImage {
       width: 100%;
       border: 1px solid #5d7590;
@@ -840,6 +960,10 @@
                   <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2zm3.71 12.29L14.29 15.7 12 13.41 9.71 15.7 8.29 14.29 10.59 12 8.29 9.71 9.71 8.29 12 10.59l2.29-2.3 1.42 1.42L13.41 12z"/></svg>
                 </span>
                 <span class="btn-label">Disconnect</span>
+              </button>
+              <button id="menuBtn" class="secondary">
+                <span class="btn-icon" aria-hidden="true">☰</span>
+                <span class="btn-label">Menu</span>
               </button>
             </div>
           </div>
@@ -961,6 +1085,16 @@
             <div id="manualStatus" class="status">Manual: OFF · keys=- · vx_cmd=0.00 · wz_cmd=0.00</div>
             <div id="cameraStatus" class="status">camera: n/a</div>
           </div>
+          <div class="telemetry-feed-grid">
+            <section class="telemetry-feed">
+              <h3>Active Alerts</h3>
+              <ul id="alertsList" class="telemetry-feed-list"></ul>
+            </section>
+            <section class="telemetry-feed">
+              <h3>Recent Events</h3>
+              <ul id="recentEventsList" class="telemetry-feed-list"></ul>
+            </section>
+          </div>
         </section>
         <section id="miniViewerSection" class="panel-section mini-viewer">
           <div id="miniViewerHost" class="mini-viewer-host"></div>
@@ -1013,6 +1147,46 @@
       </div>
       <img id="snapshotImage" alt="nav snapshot" />
       <div id="snapshotMeta">No snapshot loaded.</div>
+    </div>
+  </div>
+
+  <div id="menuModal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Menu</h3>
+        <div class="modal-shortcuts">Esc: Close</div>
+        <div class="modal-actions">
+          <button id="menuCloseBtn" class="secondary">Close</button>
+        </div>
+      </div>
+      <div class="menu-grid">
+        <section class="menu-section">
+          <h4>Debug</h4>
+          <p>Rosbag manual para debugging de navegación. El bag queda grabado dentro del workspace ROS del backend.</p>
+          <div id="rosbagStatus" class="status">Rosbag: idle</div>
+          <div class="debug-grid">
+            <div class="debug-card">
+              <strong>Output</strong>
+              <code id="rosbagOutputPath">n/a</code>
+            </div>
+            <div class="debug-card">
+              <strong>Log</strong>
+              <code id="rosbagLogPath">n/a</code>
+            </div>
+          </div>
+          <div class="debug-actions">
+            <label>
+              Profile
+              <select id="rosbagProfile">
+                <option value="core">core</option>
+                <option value="full_nav2">full_nav2</option>
+              </select>
+            </label>
+            <button id="startRosbagBtn" class="secondary">Start Bag</button>
+            <button id="stopRosbagBtn" class="danger">Stop Bag</button>
+          </div>
+        </section>
+      </div>
     </div>
   </div>
 
@@ -1095,6 +1269,19 @@
         navResultText: 'idle',
         navResultEventId: 0,
         initialized: false
+      },
+      alerts: [],
+      recentEvents: [],
+      rosbag: {
+        active: false,
+        profile: 'core',
+        output_dir: '',
+        log_path: '',
+        pid: null,
+        started_at_epoch_ms: null,
+        last_exit_code: null,
+        last_error: '',
+        available_profiles: ['core', 'full_nav2']
       },
       cameraStatus: { ok: false, error: 'camera status unavailable', last_command: 'none', zoom_in: false },
       cameraStreamConnected: false,
@@ -1333,6 +1520,16 @@
       },
       set_manual_mode: {
         buttons: {}
+      },
+      start_rosbag: {
+        buttons: {
+          startRosbagBtn: { pending: 'Starting...' }
+        }
+      },
+      stop_rosbag: {
+        buttons: {
+          stopRosbagBtn: { pending: 'Stopping...' }
+        }
       }
     };
 
@@ -1399,6 +1596,7 @@
       if (!el) return;
       el.textContent = connected ? 'connected' : 'disconnected';
       el.className = connected ? 'status good' : 'status';
+      renderRosbagUi();
     }
 
     function getButtonLabelText(buttonId) {
@@ -2733,7 +2931,35 @@
                 linear_x_cmd: msg.manual_control.linear_x_cmd,
                 angular_z_cmd: msg.manual_control.angular_z_cmd
               }
+            : null,
+          alerts: Array.isArray(msg.alerts) ? msg.alerts.length : 0,
+          recent_events: Array.isArray(msg.recent_events) ? msg.recent_events.length : 0
+        };
+      }
+      if (msg && msg.op === 'nav_event') {
+        return {
+          op: msg.op,
+          event: msg.event
+            ? {
+                severity: msg.event.severity,
+                component: msg.event.component,
+                code: msg.event.code,
+                event_id: msg.event.event_id
+              }
             : null
+        };
+      }
+      if (msg && msg.op === 'nav_alerts') {
+        return {
+          op: msg.op,
+          alerts: Array.isArray(msg.alerts) ? msg.alerts.length : 0
+        };
+      }
+      if (msg && msg.op === 'rosbag_status') {
+        return {
+          op: msg.op,
+          active: msg.rosbag ? msg.rosbag.active === true : false,
+          profile: msg.rosbag ? msg.rosbag.profile : null
         };
       }
       if (msg && msg.op === 'camera_status') {
@@ -2746,6 +2972,196 @@
         };
       }
       return msg;
+    }
+
+    function diagnosticLevelClass(level) {
+      const numeric = Number(level || 0);
+      if (numeric >= 2) return 'bad';
+      if (numeric >= 1) return 'warn';
+      return 'good';
+    }
+
+    function diagnosticLevelLabel(level) {
+      const numeric = Number(level || 0);
+      if (numeric >= 2) return 'ERROR';
+      if (numeric >= 1) return 'WARN';
+      return 'OK';
+    }
+
+    function formatEventStamp(stamp) {
+      if (!stamp || !Number.isFinite(Number(stamp.sec))) return 'n/a';
+      const ms = (Number(stamp.sec) * 1000) + Math.floor(Number(stamp.nanosec || 0) / 1e6);
+      return new Date(ms).toLocaleTimeString();
+    }
+
+    function setAlerts(alerts) {
+      state.alerts = Array.isArray(alerts) ? alerts.slice(0, 12) : [];
+      renderAlerts();
+    }
+
+    function setRecentEvents(events) {
+      const normalized = Array.isArray(events) ? events.slice(-12) : [];
+      state.recentEvents = normalized.slice().reverse();
+      renderRecentEvents();
+    }
+
+    function pushRecentEvent(eventPayload) {
+      if (!eventPayload || typeof eventPayload !== 'object') return;
+      const next = [eventPayload].concat(
+        state.recentEvents.filter((item) => Number(item.event_id || 0) !== Number(eventPayload.event_id || 0))
+      );
+      state.recentEvents = next.slice(0, 12);
+      renderRecentEvents();
+    }
+
+    function renderAlerts() {
+      const list = document.getElementById('alertsList');
+      if (!list) return;
+      list.innerHTML = '';
+      if (!Array.isArray(state.alerts) || state.alerts.length === 0) {
+        const item = document.createElement('li');
+        item.className = 'telemetry-feed-empty';
+        item.textContent = 'No active alerts.';
+        list.appendChild(item);
+        return;
+      }
+      state.alerts.forEach((alert) => {
+        const item = document.createElement('li');
+        item.className = `telemetry-feed-item ${diagnosticLevelClass(alert.level)}`;
+
+        const meta = document.createElement('div');
+        meta.className = 'telemetry-feed-meta';
+        meta.textContent = `${diagnosticLevelLabel(alert.level)} · ${String(alert.name || 'diagnostic')}`;
+
+        const code = document.createElement('div');
+        code.className = 'telemetry-feed-code';
+        code.textContent = String(alert.message || 'diagnostic alert');
+
+        item.appendChild(meta);
+        item.appendChild(code);
+        list.appendChild(item);
+      });
+    }
+
+    function renderRecentEvents() {
+      const list = document.getElementById('recentEventsList');
+      if (!list) return;
+      list.innerHTML = '';
+      if (!Array.isArray(state.recentEvents) || state.recentEvents.length === 0) {
+        const item = document.createElement('li');
+        item.className = 'telemetry-feed-empty';
+        item.textContent = 'No recent events.';
+        list.appendChild(item);
+        return;
+      }
+      state.recentEvents.forEach((eventPayload) => {
+        const item = document.createElement('li');
+        item.className = `telemetry-feed-item ${diagnosticLevelClass(eventPayload.severity)}`;
+
+        const meta = document.createElement('div');
+        meta.className = 'telemetry-feed-meta';
+        meta.textContent = `${formatEventStamp(eventPayload.stamp)} · ${String(eventPayload.component || 'nav')} · #${Number(eventPayload.event_id || 0)}`;
+
+        const code = document.createElement('div');
+        code.className = 'telemetry-feed-code';
+        code.textContent = String(eventPayload.code || 'EVENT');
+
+        const msg = document.createElement('div');
+        msg.textContent = String(eventPayload.message || '');
+
+        item.appendChild(meta);
+        item.appendChild(code);
+        item.appendChild(msg);
+        list.appendChild(item);
+      });
+    }
+
+    function openMenuModal() {
+      const modal = document.getElementById('menuModal');
+      if (!modal) return;
+      modal.classList.add('show');
+    }
+
+    function closeMenuModal() {
+      const modal = document.getElementById('menuModal');
+      if (!modal) return;
+      modal.classList.remove('show');
+    }
+
+    function updateRosbagState(payload) {
+      const next = payload && typeof payload === 'object' ? payload : {};
+      const profiles = Array.isArray(next.available_profiles) && next.available_profiles.length > 0
+        ? next.available_profiles.map((item) => String(item))
+        : ['core', 'full_nav2'];
+      state.rosbag = {
+        active: next.active === true,
+        profile: String(next.profile || state.rosbag.profile || 'core'),
+        output_dir: String(next.output_dir || ''),
+        log_path: String(next.log_path || ''),
+        pid: Number.isFinite(Number(next.pid)) ? Number(next.pid) : null,
+        started_at_epoch_ms: Number.isFinite(Number(next.started_at_epoch_ms))
+          ? Number(next.started_at_epoch_ms)
+          : null,
+        last_exit_code: Number.isFinite(Number(next.last_exit_code))
+          ? Number(next.last_exit_code)
+          : null,
+        last_error: String(next.last_error || ''),
+        available_profiles: profiles,
+      };
+      renderRosbagUi();
+    }
+
+    function formatRosbagStartedAt(epochMs) {
+      if (!Number.isFinite(Number(epochMs))) return 'n/a';
+      return new Date(Number(epochMs)).toLocaleString();
+    }
+
+    function renderRosbagUi() {
+      const statusEl = document.getElementById('rosbagStatus');
+      const outputEl = document.getElementById('rosbagOutputPath');
+      const logEl = document.getElementById('rosbagLogPath');
+      const profileEl = document.getElementById('rosbagProfile');
+      const startBtn = document.getElementById('startRosbagBtn');
+      const stopBtn = document.getElementById('stopRosbagBtn');
+      if (!statusEl || !outputEl || !logEl || !profileEl || !startBtn || !stopBtn) return;
+
+      const profiles = Array.isArray(state.rosbag.available_profiles) && state.rosbag.available_profiles.length > 0
+        ? state.rosbag.available_profiles
+        : ['core', 'full_nav2'];
+      const selectedValue = state.rosbag.active
+        ? state.rosbag.profile
+        : String(profileEl.value || state.rosbag.profile || 'core');
+      profileEl.innerHTML = '';
+      profiles.forEach((profile) => {
+        const option = document.createElement('option');
+        option.value = String(profile);
+        option.textContent = String(profile);
+        profileEl.appendChild(option);
+      });
+      profileEl.value = profiles.includes(selectedValue) ? selectedValue : profiles[0];
+
+      if (state.rosbag.active) {
+        const startedText = formatRosbagStartedAt(state.rosbag.started_at_epoch_ms);
+        statusEl.textContent = `Rosbag: recording ${state.rosbag.profile} · pid=${state.rosbag.pid ?? 'n/a'} · started=${startedText}`;
+        statusEl.className = 'status good';
+      } else if (state.rosbag.last_error) {
+        statusEl.textContent = `Rosbag: idle · last error: ${state.rosbag.last_error}`;
+        statusEl.className = 'status bad';
+      } else if (state.rosbag.last_exit_code != null) {
+        statusEl.textContent = `Rosbag: idle · last exit code=${state.rosbag.last_exit_code}`;
+        statusEl.className = 'status';
+      } else {
+        statusEl.textContent = 'Rosbag: idle';
+        statusEl.className = 'status';
+      }
+
+      outputEl.textContent = state.rosbag.output_dir || 'n/a';
+      logEl.textContent = state.rosbag.log_path || 'n/a';
+
+      const connected = state.connected === true;
+      profileEl.disabled = state.rosbag.active;
+      startBtn.disabled = !connected || state.rosbag.active;
+      stopBtn.disabled = !connected || !state.rosbag.active;
     }
 
     function updateCameraStatusUi(payload) {
@@ -2782,6 +3198,13 @@
     }
 
     function updateNavTelemetry(payload) {
+      if (payload && Array.isArray(payload.alerts)) {
+        setAlerts(payload.alerts);
+      }
+      if (payload && Array.isArray(payload.recent_events)) {
+        setRecentEvents(payload.recent_events);
+      }
+
       const cmdVel = payload && payload.cmd_vel_safe ? payload.cmd_vel_safe : null;
       state.cmdVelSafe = cmdVel;
 
@@ -2918,6 +3341,10 @@
       state.navTelemetry.navResultText = 'idle';
       state.navTelemetry.navResultEventId = 0;
       state.navTelemetry.initialized = false;
+      state.alerts = [];
+      state.recentEvents = [];
+      renderAlerts();
+      renderRecentEvents();
     }
 
     function sendManualCmd(linearX, angularZ, brakePct = 0) {
@@ -3234,8 +3661,11 @@
           goal_active: msg.goal_active,
           nav_result_status: msg.nav_result_status,
           nav_result_text: msg.nav_result_text,
-          nav_result_event_id: msg.nav_result_event_id
+          nav_result_event_id: msg.nav_result_event_id,
+          alerts: msg.alerts,
+          recent_events: msg.recent_events
         });
+        updateRosbagState(msg.rosbag || null);
         syncManualControlFromServer(msg.manual_control || null);
         if (msg.camera_status) {
           updateCameraStatusUi(msg.camera_status);
@@ -3251,6 +3681,21 @@
       if (msg.op === 'nav_telemetry') {
         updateNavTelemetry(msg);
         syncManualControlFromServer(msg.manual_control || null);
+        return;
+      }
+
+      if (msg.op === 'nav_event') {
+        pushRecentEvent(msg.event || null);
+        return;
+      }
+
+      if (msg.op === 'nav_alerts') {
+        setAlerts(msg.alerts);
+        return;
+      }
+
+      if (msg.op === 'rosbag_status') {
+        updateRosbagState(msg.rosbag || null);
         return;
       }
 
@@ -3394,6 +3839,20 @@
               last_command: state.cameraStatus.last_command,
               zoom_in: state.cameraStatus.zoom_in
             });
+          }
+        } else if (msg.request === 'start_rosbag') {
+          updateRosbagState(msg.rosbag || null);
+          if (msg.ok) {
+            setStatus(`Rosbag recording started (${state.rosbag.profile})`, true);
+          } else {
+            setStatus(`Rosbag start failed: ${msg.error || 'error'}`, false);
+          }
+        } else if (msg.request === 'stop_rosbag') {
+          updateRosbagState(msg.rosbag || null);
+          if (msg.ok) {
+            setStatus('Rosbag recording stopped', true);
+          } else {
+            setStatus(`Rosbag stop failed: ${msg.error || 'error'}`, false);
           }
         } else {
           if (msg.ok) {
@@ -3968,6 +4427,24 @@
     document.getElementById('wsHost').addEventListener('input', rememberCurrentConnectionFields);
     document.getElementById('wsPort').addEventListener('input', rememberCurrentConnectionFields);
     document.getElementById('disconnectBtn').addEventListener('click', disconnectWs);
+    document.getElementById('menuBtn').addEventListener('click', () => {
+      openMenuModal();
+      if (state.connected) {
+        send({ op: 'get_rosbag_status' }, { track: false });
+      } else {
+        renderRosbagUi();
+      }
+    });
+    document.getElementById('menuCloseBtn').addEventListener('click', () => {
+      closeMenuModal();
+    });
+    document.getElementById('startRosbagBtn').addEventListener('click', () => {
+      const profile = String(document.getElementById('rosbagProfile')?.value || 'core');
+      send({ op: 'start_rosbag', profile });
+    });
+    document.getElementById('stopRosbagBtn').addEventListener('click', () => {
+      send({ op: 'stop_rosbag' });
+    });
     document.getElementById('refreshBtn').addEventListener('click', () => send({ op: 'get_state' }));
     document.getElementById('saveBtn').addEventListener('click', pushLayersToServer);
     document.getElementById('loadBtn').addEventListener('click', () => send({ op: 'load_zones_file' }));
@@ -4057,12 +4534,18 @@
       const key = event.key;
       const isEscape = code === 'Escape' || key === 'Escape';
       const snapshotModal = document.getElementById('snapshotModal');
+      const menuModal = document.getElementById('menuModal');
       if (isEscape && snapshotModal && snapshotModal.classList.contains('show')) {
         event.preventDefault();
         if (event.shiftKey) {
           downloadLastSnapshot();
         }
         closeSnapshotModal();
+        return;
+      }
+      if (isEscape && menuModal && menuModal.classList.contains('show')) {
+        event.preventDefault();
+        closeMenuModal();
         return;
       }
 
@@ -4218,6 +4701,11 @@
         closeSnapshotModal();
       }
     });
+    document.getElementById('menuModal').addEventListener('click', (e) => {
+      if (e.target && e.target.id === 'menuModal') {
+        closeMenuModal();
+      }
+    });
 
     const mapContainer = map.getContainer();
     mapContainer.addEventListener('pointerdown', beginGoalCreateSession, { passive: false });
@@ -4265,6 +4753,9 @@
     updateManualSliderLabels();
     renderManualStatus();
     updateCameraStatusUi(state.cameraStatus);
+    renderAlerts();
+    renderRecentEvents();
+    renderRosbagUi();
     renderZoneList({ zones: state.lastZones });
     updateGoalButtonsState();
     updateWaypointStatus();

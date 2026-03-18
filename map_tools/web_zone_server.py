@@ -1,9 +1,15 @@
 import asyncio
 import base64
+from collections import deque
 import json
 import math
+import os
+import shlex
+import signal
+import subprocess
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -11,6 +17,7 @@ import numpy as np
 import rclpy
 import websockets
 from ament_index_python.packages import get_package_share_directory
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from nav_msgs.msg import Odometry
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -18,7 +25,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import NavSatFix
 from std_srvs.srv import Trigger
 
-from interfaces.msg import CmdVelFinal, NavTelemetry
+from interfaces.msg import CmdVelFinal, NavEvent, NavTelemetry
 from interfaces.srv import (
     BrakeNav,
     CameraPan,
@@ -34,7 +41,62 @@ from interfaces.srv import (
 from .waypoints_file_utils import load_waypoints_yaml_file, save_waypoints_yaml_file
 
 
+ROSBAG_TOPIC_PROFILES: Dict[str, Tuple[str, ...]] = {
+    "core": (
+        "/gps/fix",
+        "/odometry/local",
+        "/odometry/gps",
+        "/imu/data",
+        "/scan",
+        "/cmd_vel",
+        "/cmd_vel_safe",
+        "/cmd_vel_final",
+        "/collision_monitor_state",
+        "/nav_command_server/telemetry",
+        "/nav_command_server/events",
+        "/controller/status",
+        "/controller/telemetry",
+        "/diagnostics",
+        "/tf",
+        "/tf_static",
+        "/rosout",
+    ),
+    "full_nav2": (
+        "/gps/fix",
+        "/odometry/local",
+        "/odometry/gps",
+        "/imu/data",
+        "/scan",
+        "/cmd_vel",
+        "/cmd_vel_safe",
+        "/cmd_vel_final",
+        "/collision_monitor_state",
+        "/nav_command_server/telemetry",
+        "/nav_command_server/events",
+        "/controller/status",
+        "/controller/telemetry",
+        "/diagnostics",
+        "/tf",
+        "/tf_static",
+        "/rosout",
+        "/plan",
+        "/local_costmap/costmap",
+        "/global_costmap/costmap",
+        "/local_costmap/published_footprint",
+        "/behavior_tree_log",
+    ),
+}
+
+UNSET = object()
+
+
 class WebZoneServerNode(Node):
+    @staticmethod
+    def _diag_level_value(value: Any) -> int:
+        if isinstance(value, (bytes, bytearray)):
+            return int.from_bytes(value, byteorder="little", signed=False)
+        return int(value)
+
     def __init__(self, loop: asyncio.AbstractEventLoop):
         super().__init__("web_zone_server")
         self._loop = loop
@@ -64,6 +126,9 @@ class WebZoneServerNode(Node):
 
         self.declare_parameter("nav_snapshot_service", "/nav_snapshot_server/get_nav_snapshot")
         self.declare_parameter("nav_telemetry_topic", "/nav_command_server/telemetry")
+        self.declare_parameter("nav_events_topic", "/nav_command_server/events")
+        self.declare_parameter("diagnostics_topic", "/diagnostics")
+        self.declare_parameter("rosbag_output_dir", "/ros2_ws/bags")
         self.declare_parameter("camera_pan_service", "/camara/camera_pan")
         self.declare_parameter("camera_zoom_toggle_service", "/camara/camera_zoom_toggle")
         self.declare_parameter("camera_status_service", "/camara/camera_status")
@@ -108,6 +173,9 @@ class WebZoneServerNode(Node):
 
         self.nav_snapshot_service = str(self.get_parameter("nav_snapshot_service").value)
         self.nav_telemetry_topic = str(self.get_parameter("nav_telemetry_topic").value)
+        self.nav_events_topic = str(self.get_parameter("nav_events_topic").value)
+        self.diagnostics_topic = str(self.get_parameter("diagnostics_topic").value)
+        self.rosbag_output_dir = str(self.get_parameter("rosbag_output_dir").value)
         self.camera_pan_service = str(self.get_parameter("camera_pan_service").value)
         self.camera_zoom_toggle_service = str(
             self.get_parameter("camera_zoom_toggle_service").value
@@ -148,6 +216,15 @@ class WebZoneServerNode(Node):
             "last_command": "none",
             "zoom_in": False,
         }
+        self._recent_nav_events: deque[Dict[str, Any]] = deque(maxlen=30)
+        self._active_alerts: List[Dict[str, Any]] = []
+        self._rosbag_process: Optional[subprocess.Popen] = None
+        self._rosbag_profile = ""
+        self._rosbag_output_path = ""
+        self._rosbag_log_path = ""
+        self._rosbag_started_at_epoch_ms: Optional[int] = None
+        self._rosbag_last_exit_code: Optional[int] = None
+        self._rosbag_last_error = ""
 
         self._manual_cmd_last_monotonic: Optional[float] = None
 
@@ -159,6 +236,12 @@ class WebZoneServerNode(Node):
         )
         self._nav_telemetry_sub = self.create_subscription(
             NavTelemetry, self.nav_telemetry_topic, self._on_nav_telemetry, 10
+        )
+        self._nav_events_sub = self.create_subscription(
+            NavEvent, self.nav_events_topic, self._on_nav_event, 10
+        )
+        self._diagnostics_sub = self.create_subscription(
+            DiagnosticArray, self.diagnostics_topic, self._on_diagnostics, 10
         )
 
         self._zones_set_geojson_client = self.create_client(
@@ -190,6 +273,8 @@ class WebZoneServerNode(Node):
             "Web gateway ready "
             f"(ws={self.ws_host}:{self.ws_port}, zones_set={self.zones_set_geojson_service}, "
             f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service}, "
+            f"nav_events={self.nav_events_topic}, diagnostics={self.diagnostics_topic}, "
+            f"rosbag_dir={self.rosbag_output_dir}, "
             f"camera_pan={self.camera_pan_service}, camera_zoom_toggle={self.camera_zoom_toggle_service}, "
             f"camera_status={self.camera_status_service}, "
             f"teleop_topic={self.teleop_cmd_topic}, gps_topic={self.gps_topic}, "
@@ -240,6 +325,9 @@ class WebZoneServerNode(Node):
                 "nav_result_status": int(self._nav_result_status),
                 "nav_result_text": str(self._nav_result_text),
                 "nav_result_event_id": int(self._nav_result_event_id),
+                "alerts": list(self._active_alerts),
+                "recent_events": list(self._recent_nav_events),
+                "rosbag": self._build_rosbag_status_payload_locked(),
                 "camera_status": dict(self._camera_status),
             }
 
@@ -251,6 +339,8 @@ class WebZoneServerNode(Node):
             nav_result_status = int(self._nav_result_status)
             nav_result_text = str(self._nav_result_text)
             nav_result_event_id = int(self._nav_result_event_id)
+            alerts = list(self._active_alerts)
+            recent_events = list(self._recent_nav_events)
         return {
             "op": "nav_telemetry",
             "cmd_vel_safe": cmd_vel_safe,
@@ -259,7 +349,290 @@ class WebZoneServerNode(Node):
             "nav_result_status": nav_result_status,
             "nav_result_text": nav_result_text,
             "nav_result_event_id": nav_result_event_id,
+            "alerts": alerts,
+            "recent_events": recent_events,
         }
+
+    @staticmethod
+    def _rosbag_topics_for_profile(profile: str) -> Optional[Tuple[str, ...]]:
+        return ROSBAG_TOPIC_PROFILES.get(str(profile))
+
+    def _build_rosbag_status_payload_locked(self) -> Dict[str, Any]:
+        active = self._rosbag_process is not None and self._rosbag_process.poll() is None
+        pid = None
+        if active and self._rosbag_process is not None:
+            pid = int(self._rosbag_process.pid)
+        return {
+            "active": bool(active),
+            "profile": str(self._rosbag_profile),
+            "output_dir": str(self._rosbag_output_path),
+            "log_path": str(self._rosbag_log_path),
+            "pid": pid,
+            "started_at_epoch_ms": (
+                int(self._rosbag_started_at_epoch_ms)
+                if self._rosbag_started_at_epoch_ms is not None
+                else None
+            ),
+            "last_exit_code": (
+                int(self._rosbag_last_exit_code)
+                if self._rosbag_last_exit_code is not None
+                else None
+            ),
+            "last_error": str(self._rosbag_last_error),
+            "available_profiles": sorted(ROSBAG_TOPIC_PROFILES.keys()),
+        }
+
+    def _rosbag_status_payload(self) -> Dict[str, Any]:
+        with self._lock:
+            return self._build_rosbag_status_payload_locked()
+
+    @staticmethod
+    def _nav_event_details_to_dict(msg: NavEvent) -> Dict[str, str]:
+        details: Dict[str, str] = {}
+        for item in getattr(msg, "details", []) or []:
+            key = str(getattr(item, "key", "") or "")
+            if not key:
+                continue
+            details[key] = str(getattr(item, "value", "") or "")
+        return details
+
+    @staticmethod
+    def _diagnostic_values_to_dict(status: Any) -> Dict[str, str]:
+        values: Dict[str, str] = {}
+        for item in getattr(status, "values", []) or []:
+            key = str(getattr(item, "key", "") or "")
+            if not key:
+                continue
+            values[key] = str(getattr(item, "value", "") or "")
+        return values
+
+    def _nav_event_to_payload(self, msg: NavEvent) -> Dict[str, Any]:
+        return {
+            "stamp": {
+                "sec": int(getattr(msg.stamp, "sec", 0)),
+                "nanosec": int(getattr(msg.stamp, "nanosec", 0)),
+            },
+            "severity": int(msg.severity),
+            "component": str(msg.component),
+            "code": str(msg.code),
+            "message": str(msg.message),
+            "event_id": int(msg.event_id),
+            "details": self._nav_event_details_to_dict(msg),
+        }
+
+    def _diagnostic_status_to_payload(self, status: Any) -> Dict[str, Any]:
+        return {
+            "name": str(getattr(status, "name", "")),
+            "level": self._diag_level_value(
+                getattr(
+                    status,
+                    "level",
+                    self._diag_level_value(DiagnosticStatus.OK),
+                )
+            ),
+            "message": str(getattr(status, "message", "")),
+            "hardware_id": str(getattr(status, "hardware_id", "")),
+            "values": self._diagnostic_values_to_dict(status),
+        }
+
+    def _should_surface_diagnostic(self, status: Any) -> bool:
+        level = self._diag_level_value(
+            getattr(
+                status,
+                "level",
+                self._diag_level_value(DiagnosticStatus.OK),
+            )
+        )
+        if level == self._diag_level_value(DiagnosticStatus.OK):
+            return False
+        name = str(getattr(status, "name", "") or "")
+        if not name.startswith("navigation/"):
+            return False
+        message = str(getattr(status, "message", "") or "")
+        if name == "navigation/collision_monitor" and message == "no collision monitor state yet":
+            return False
+        return True
+
+    def _broadcast_from_thread(self, payload: Dict[str, Any]) -> None:
+        asyncio.run_coroutine_threadsafe(self._broadcast(payload), self._loop)
+
+    def _broadcast_rosbag_status(self) -> None:
+        self._broadcast_from_thread(
+            {
+                "op": "rosbag_status",
+                "rosbag": self._rosbag_status_payload(),
+            }
+        )
+
+    def _update_rosbag_state_locked(
+        self,
+        *,
+        process: Any = UNSET,
+        profile: Any = UNSET,
+        output_path: Any = UNSET,
+        log_path: Any = UNSET,
+        started_at_epoch_ms: Any = UNSET,
+        last_exit_code: Any = UNSET,
+        last_error: Any = UNSET,
+    ) -> None:
+        if process is not UNSET:
+            self._rosbag_process = process
+        if profile is not UNSET:
+            self._rosbag_profile = str(profile)
+        if output_path is not UNSET:
+            self._rosbag_output_path = str(output_path)
+        if log_path is not UNSET:
+            self._rosbag_log_path = str(log_path)
+        if started_at_epoch_ms is not UNSET:
+            if started_at_epoch_ms is None:
+                self._rosbag_started_at_epoch_ms = None
+            else:
+                self._rosbag_started_at_epoch_ms = int(started_at_epoch_ms)
+        if last_exit_code is not UNSET:
+            if last_exit_code is None:
+                self._rosbag_last_exit_code = None
+            else:
+                self._rosbag_last_exit_code = int(last_exit_code)
+        if last_error is not UNSET:
+            self._rosbag_last_error = str(last_error)
+
+    def _rosbag_waiter(self, process: subprocess.Popen) -> None:
+        exit_code = process.wait()
+        with self._lock:
+            if self._rosbag_process is not process:
+                return
+            self._rosbag_process = None
+            self._rosbag_last_exit_code = int(exit_code)
+            if exit_code == 0:
+                self._rosbag_last_error = ""
+            elif not self._rosbag_last_error:
+                self._rosbag_last_error = f"rosbag exited with code {exit_code}"
+        self._broadcast_rosbag_status()
+
+    def get_rosbag_status(self) -> Dict[str, Any]:
+        return self._rosbag_status_payload()
+
+    def start_rosbag(self, profile: str = "core") -> Tuple[bool, str, Dict[str, Any]]:
+        profile_name = str(profile or "core").strip() or "core"
+        topics = self._rosbag_topics_for_profile(profile_name)
+        if topics is None:
+            return False, f"unknown rosbag profile: {profile_name}", self.get_rosbag_status()
+
+        with self._lock:
+            if self._rosbag_process is not None and self._rosbag_process.poll() is None:
+                return False, "rosbag is already running", self._build_rosbag_status_payload_locked()
+
+        bags_dir = Path(self.rosbag_output_dir)
+        bags_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        output_dir = bags_dir / f"nav_debug_{profile_name}_{stamp}"
+        log_path = bags_dir / f"nav_debug_{profile_name}_{stamp}.log"
+
+        output_dir_quoted = shlex.quote(str(output_dir))
+        topics_quoted = " ".join(shlex.quote(topic) for topic in topics)
+        cmd = (
+            "source /opt/ros/${ROS_DISTRO:-humble}/setup.bash && "
+            "if [ -f /ros2_ws/install/setup.bash ]; then source /ros2_ws/install/setup.bash; fi && "
+            "cd /ros2_ws && "
+            f"exec ros2 bag record -o {output_dir_quoted} {topics_quoted}"
+        )
+
+        with log_path.open("ab") as log_file:
+            process = subprocess.Popen(
+                ["bash", "-lc", cmd],
+                cwd="/ros2_ws",
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                preexec_fn=os.setsid,
+            )
+
+        time.sleep(0.4)
+        exit_code = process.poll()
+        if exit_code is not None:
+            err = f"rosbag failed to start (exit_code={exit_code})"
+            with self._lock:
+                self._update_rosbag_state_locked(
+                    process=None,
+                    profile=profile_name,
+                    output_path=str(output_dir),
+                    log_path=str(log_path),
+                    started_at_epoch_ms=None,
+                    last_exit_code=int(exit_code),
+                    last_error=err,
+                )
+            self._broadcast_rosbag_status()
+            return False, err, self.get_rosbag_status()
+
+        started_at_epoch_ms = int(time.time() * 1000.0)
+        with self._lock:
+            self._update_rosbag_state_locked(
+                process=process,
+                profile=profile_name,
+                output_path=str(output_dir),
+                log_path=str(log_path),
+                started_at_epoch_ms=started_at_epoch_ms,
+                last_exit_code=None,
+                last_error="",
+            )
+        waiter = threading.Thread(
+            target=self._rosbag_waiter,
+            args=(process,),
+            daemon=True,
+            name="rosbag_waiter",
+        )
+        waiter.start()
+        self._broadcast_rosbag_status()
+        return True, "", self.get_rosbag_status()
+
+    def stop_rosbag(self) -> Tuple[bool, str, Dict[str, Any]]:
+        with self._lock:
+            process = self._rosbag_process
+        if process is None or process.poll() is not None:
+            with self._lock:
+                self._rosbag_process = None
+            return False, "rosbag is not running", self.get_rosbag_status()
+
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGINT)
+        except Exception:
+            try:
+                process.send_signal(signal.SIGINT)
+            except Exception as exc:
+                return False, f"failed to stop rosbag: {exc}", self.get_rosbag_status()
+
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            if process.poll() is not None:
+                break
+            time.sleep(0.1)
+        if process.poll() is None:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            except Exception:
+                process.terminate()
+            try:
+                process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except Exception:
+                    process.kill()
+                process.wait(timeout=5.0)
+
+        with self._lock:
+            if self._rosbag_process is process:
+                self._rosbag_process = None
+                self._rosbag_last_exit_code = int(process.returncode or 0)
+                if int(process.returncode or 0) == 0:
+                    self._rosbag_last_error = ""
+        self._broadcast_rosbag_status()
+        return True, "", self.get_rosbag_status()
+
+    def close(self) -> None:
+        try:
+            self.stop_rosbag()
+        except Exception:
+            pass
 
     async def _broadcast(self, payload: Dict[str, Any]) -> None:
         text = json.dumps(payload)
@@ -393,6 +766,33 @@ class WebZoneServerNode(Node):
                 self._broadcast({"op": "robot_pose", "pose": robot_pose_payload}),
                 self._loop,
             )
+
+    def _on_nav_event(self, msg: NavEvent) -> None:
+        payload = self._nav_event_to_payload(msg)
+        with self._lock:
+            self._recent_nav_events.append(payload)
+        asyncio.run_coroutine_threadsafe(
+            self._broadcast({"op": "nav_event", "event": payload}), self._loop
+        )
+        asyncio.run_coroutine_threadsafe(
+            self._broadcast(self._build_nav_telemetry_payload()), self._loop
+        )
+
+    def _on_diagnostics(self, msg: DiagnosticArray) -> None:
+        alerts = [
+            self._diagnostic_status_to_payload(status)
+            for status in (msg.status or [])
+            if self._should_surface_diagnostic(status)
+        ]
+        alerts.sort(key=lambda item: (-int(item.get("level", 0)), str(item.get("name", ""))))
+        with self._lock:
+            self._active_alerts = alerts
+        asyncio.run_coroutine_threadsafe(
+            self._broadcast({"op": "nav_alerts", "alerts": alerts}), self._loop
+        )
+        asyncio.run_coroutine_threadsafe(
+            self._broadcast(self._build_nav_telemetry_payload()), self._loop
+        )
 
     def _wait_for_future(self, future: Any, timeout_s: float) -> Optional[Any]:
         start = time.monotonic()
@@ -1015,6 +1415,16 @@ class WebSocketApi:
             await self._send_json(ws, payload)
             return
 
+        if op == "get_rosbag_status":
+            payload = {
+                "op": "rosbag_status",
+                "rosbag": await asyncio.to_thread(self.node.get_rosbag_status),
+            }
+            if client_req_id is not None:
+                payload["client_req_id"] = client_req_id
+            await self._send_json(ws, payload)
+            return
+
         if op == "set_zones_geojson":
             geojson_payload = msg.get("geojson")
             if geojson_payload is None:
@@ -1209,6 +1619,31 @@ class WebSocketApi:
             )
             return
 
+        if op == "start_rosbag":
+            profile = str(msg.get("profile", "core") or "core")
+            ok, err, status_payload = await asyncio.to_thread(self.node.start_rosbag, profile)
+            await self._send_ack(
+                ws,
+                "start_rosbag",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={"rosbag": status_payload},
+            )
+            return
+
+        if op == "stop_rosbag":
+            ok, err, status_payload = await asyncio.to_thread(self.node.stop_rosbag)
+            await self._send_ack(
+                ws,
+                "stop_rosbag",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={"rosbag": status_payload},
+            )
+            return
+
         if op == "camera_pan":
             angle_raw = msg.get("angle")
             try:
@@ -1291,6 +1726,7 @@ async def async_main() -> None:
     finally:
         server.close()
         await server.wait_closed()
+        await asyncio.to_thread(node.close)
         executor.shutdown()
         node.destroy_node()
         try:
