@@ -14,6 +14,7 @@ from ament_index_python.packages import get_package_share_directory
 from nav_msgs.msg import Odometry
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import NavSatFix
 from std_srvs.srv import Trigger
 
@@ -151,7 +152,7 @@ class WebZoneServerNode(Node):
         self._manual_cmd_last_monotonic: Optional[float] = None
 
         self._gps_sub = self.create_subscription(
-            NavSatFix, self.gps_topic, self._on_gps_fix, 10
+            NavSatFix, self.gps_topic, self._on_gps_fix, qos_profile_sensor_data
         )
         self._odom_sub = self.create_subscription(
             Odometry, self.odom_topic, self._on_odometry, 10
@@ -191,7 +192,8 @@ class WebZoneServerNode(Node):
             f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service}, "
             f"camera_pan={self.camera_pan_service}, camera_zoom_toggle={self.camera_zoom_toggle_service}, "
             f"camera_status={self.camera_status_service}, "
-            f"teleop_topic={self.teleop_cmd_topic}, odom_topic={self.odom_topic})"
+            f"teleop_topic={self.teleop_cmd_topic}, gps_topic={self.gps_topic}, "
+            f"odom_topic={self.odom_topic})"
         )
         self.get_logger().info(f"Waypoints file path: {self.waypoints_file}")
 
