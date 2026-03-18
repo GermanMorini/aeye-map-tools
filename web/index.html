@@ -247,6 +247,7 @@
     .row > * { min-width: 0; }
     .row > *:only-child { grid-column: 1 / -1; }
     .stack { display: flex; flex-direction: column; gap: 8px; }
+    .hidden { display: none !important; }
     input, button, select, textarea {
       font: inherit;
       border-radius: 8px;
@@ -818,6 +819,12 @@
           </div>
           <div class="stack">
             <div class="row">
+              <select id="connectionPreset" aria-label="Connection preset">
+                <option value="real">Real</option>
+                <option value="sim">Sim</option>
+              </select>
+            </div>
+            <div class="row">
               <input id="wsHost" value="100.111.4.7" placeholder="Host" />
               <input id="wsPort" value="8766" placeholder="Port" />
             </div>
@@ -1012,7 +1019,12 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
   <script>
-    const CAMERA_IFRAME_URL = 'http://100.111.4.7:8889/cam3/';
+    const REAL_WS_DEFAULT_HOST = '100.111.4.7';
+    const DEFAULT_WS_PORT = '8766';
+    const REAL_CAMERA_IFRAME_URL = 'http://100.111.4.7:8889/cam3/';
+    const CONNECTION_PRESET_STORAGE_KEY = 'map_tools.connection_presets.v1';
+    const CAMERA_DISABLED_SIM_ERROR = 'disabled in sim';
+    const CAMERA_OPS = new Set(['camera_pan', 'camera_zoom_toggle', 'get_camera_status']);
     const GPS_MAX_ZOOM = 22;
     const GPS_DEFAULT_ZOOM = GPS_MAX_ZOOM - 3;
     const map = L.map('map', { zoomControl: true }).setView(
@@ -1058,6 +1070,11 @@
     const state = {
       ws: null,
       connected: false,
+      connectionPreset: 'real',
+      connectionPresetValues: {
+        real: { host: REAL_WS_DEFAULT_HOST, port: DEFAULT_WS_PORT },
+        sim: { host: 'localhost', port: DEFAULT_WS_PORT }
+      },
       seqZoneId: 1,
       frameId: 'map',
       lastZones: [],
@@ -1118,6 +1135,148 @@
       },
       zoneDragSuppressClickUntilMs: 0
     };
+
+    function getPageHostnameOrLocalhost() {
+      const host = String(window.location.hostname || '').trim();
+      return host || 'localhost';
+    }
+
+    function normalizeConnectionPreset(value) {
+      return String(value || '').toLowerCase() === 'sim' ? 'sim' : 'real';
+    }
+
+    function getPresetDefaults(preset) {
+      if (normalizeConnectionPreset(preset) === 'sim') {
+        return { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT };
+      }
+      return { host: REAL_WS_DEFAULT_HOST, port: DEFAULT_WS_PORT };
+    }
+
+    function readConnectionPresetStorage() {
+      const fallback = {
+        preset: 'real',
+        presets: {
+          real: { host: REAL_WS_DEFAULT_HOST, port: DEFAULT_WS_PORT },
+          sim: { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT }
+        }
+      };
+      try {
+        const raw = window.localStorage.getItem(CONNECTION_PRESET_STORAGE_KEY);
+        if (!raw) return fallback;
+        const parsed = JSON.parse(raw);
+        const presets = parsed && typeof parsed === 'object' ? parsed.presets : null;
+        const realDefaults = getPresetDefaults('real');
+        const simDefaults = getPresetDefaults('sim');
+        return {
+          preset: normalizeConnectionPreset(parsed && parsed.preset),
+          presets: {
+            real: {
+              host: String(presets && presets.real && presets.real.host || realDefaults.host),
+              port: String(presets && presets.real && presets.real.port || realDefaults.port)
+            },
+            sim: {
+              host: String(presets && presets.sim && presets.sim.host || simDefaults.host),
+              port: String(presets && presets.sim && presets.sim.port || simDefaults.port)
+            }
+          }
+        };
+      } catch (_) {
+        return fallback;
+      }
+    }
+
+    function persistConnectionPresetStorage() {
+      try {
+        window.localStorage.setItem(
+          CONNECTION_PRESET_STORAGE_KEY,
+          JSON.stringify({
+            preset: state.connectionPreset,
+            presets: state.connectionPresetValues
+          })
+        );
+      } catch (_) {
+        // Ignore storage failures and keep the page usable.
+      }
+    }
+
+    function getEffectiveConnectionPreset() {
+      return normalizeConnectionPreset(state.connectionPreset);
+    }
+
+    function getEffectiveConnectionConfig() {
+      const preset = getEffectiveConnectionPreset();
+      const fallback = getPresetDefaults(preset);
+      const hostInput = document.getElementById('wsHost');
+      const portInput = document.getElementById('wsPort');
+      const wsHost = String(hostInput?.value || fallback.host).trim() || fallback.host;
+      const wsPort = String(portInput?.value || fallback.port).trim() || fallback.port;
+      return {
+        preset,
+        wsHost,
+        wsPort,
+        cameraEnabled: preset !== 'sim',
+        cameraIframeUrl: preset === 'sim' ? '' : REAL_CAMERA_IFRAME_URL
+      };
+    }
+
+    function getEffectiveCameraIframeUrl() {
+      return getEffectiveConnectionConfig().cameraIframeUrl;
+    }
+
+    function rememberCurrentConnectionFields() {
+      const preset = getEffectiveConnectionPreset();
+      const hostInput = document.getElementById('wsHost');
+      const portInput = document.getElementById('wsPort');
+      if (!hostInput || !portInput) return;
+      state.connectionPresetValues[preset] = {
+        host: String(hostInput.value || '').trim() || getPresetDefaults(preset).host,
+        port: String(portInput.value || '').trim() || getPresetDefaults(preset).port
+      };
+      persistConnectionPresetStorage();
+    }
+
+    function syncConnectionPresetSelect() {
+      const presetSelect = document.getElementById('connectionPreset');
+      if (presetSelect) {
+        presetSelect.value = getEffectiveConnectionPreset();
+      }
+    }
+
+    function applyConnectionPresetUi() {
+      const cfg = getEffectiveConnectionConfig();
+      const cameraSection = document.getElementById('cameraSection');
+      const cameraPane = document.getElementById('cameraPane');
+      const swapBtn = document.getElementById('swapViewBtn');
+      if (!cfg.cameraEnabled) {
+        disconnectCameraStream({ announce: false });
+        state.primaryView = 'gps';
+        updateCameraStatusUi({ ok: false, error: CAMERA_DISABLED_SIM_ERROR, last_command: 'none', zoom_in: false });
+      } else if (state.cameraStatus.error === CAMERA_DISABLED_SIM_ERROR) {
+        updateCameraStatusUi({ ok: false, error: 'camera unavailable', last_command: 'none', zoom_in: false });
+      }
+      cameraSection?.classList.toggle('hidden', !cfg.cameraEnabled);
+      cameraPane?.classList.toggle('hidden', !cfg.cameraEnabled);
+      swapBtn?.classList.toggle('hidden', !cfg.cameraEnabled);
+      renderCameraStreamUi();
+      relocateTopSections();
+      applyViewMode();
+    }
+
+    function applyConnectionPreset(preset, options = {}) {
+      const nextPreset = normalizeConnectionPreset(preset);
+      if (options.saveCurrent !== false) {
+        rememberCurrentConnectionFields();
+      }
+      state.connectionPreset = nextPreset;
+      const values = state.connectionPresetValues[nextPreset] || getPresetDefaults(nextPreset);
+      const hostInput = document.getElementById('wsHost');
+      const portInput = document.getElementById('wsPort');
+      if (hostInput) hostInput.value = values.host;
+      if (portInput) portInput.value = values.port;
+      syncConnectionPresetSelect();
+      persistConnectionPresetStorage();
+      applyConnectionPresetUi();
+    }
 
     const MANUAL_LOOP_HZ = 20.0;
     const MANUAL_EMERGENCY_BRAKE_PCT = 100;
@@ -1276,6 +1435,10 @@
     }
 
     async function probeCameraStreamAvailability() {
+      const cameraUrl = getEffectiveCameraIframeUrl();
+      if (!cameraUrl) {
+        return [false, CAMERA_DISABLED_SIM_ERROR];
+      }
       let controller = null;
       let timeoutId = null;
       try {
@@ -1285,7 +1448,7 @@
             controller.abort();
           }, CAMERA_STREAM_PROBE_TIMEOUT_MS);
         }
-        await fetch(CAMERA_IFRAME_URL, {
+        await fetch(cameraUrl, {
           method: 'GET',
           mode: 'no-cors',
           cache: 'no-store',
@@ -1309,6 +1472,7 @@
       const streamStatus = document.getElementById('cameraStreamState');
       const overlay = document.getElementById('cameraDisconnectedOverlay');
       if (!toggleBtn || !streamStatus || !overlay) return;
+      const cameraEnabled = getEffectiveConnectionConfig().cameraEnabled;
 
       const pending = state.cameraStreamPending;
       const connected = state.cameraStreamConnected === true;
@@ -1319,7 +1483,12 @@
       let overlayText = 'camara desconectada';
       let overlayVisible = true;
 
-      if (pending === 'connecting') {
+      if (!cameraEnabled) {
+        label = 'Disabled';
+        statusText = 'camera: disabled in sim';
+        className = 'status';
+        overlayText = 'camara deshabilitada en simulacion';
+      } else if (pending === 'connecting') {
         label = 'Connecting...';
         statusText = 'camera: connecting';
         className = 'status';
@@ -1337,7 +1506,7 @@
       }
 
       setButtonLabelText('cameraStreamToggleBtn', label);
-      toggleBtn.disabled = pending !== 'idle';
+      toggleBtn.disabled = !cameraEnabled || pending !== 'idle';
       toggleBtn.classList.toggle('camera-connect', pending === 'connecting' || (!connected && pending === 'idle'));
       toggleBtn.classList.toggle('camera-disconnect', pending === 'disconnecting' || (connected && pending === 'idle'));
 
@@ -1366,6 +1535,11 @@
     }
 
     async function connectCameraStream() {
+      if (!getEffectiveConnectionConfig().cameraEnabled) {
+        updateCameraStatusUi({ ok: false, error: CAMERA_DISABLED_SIM_ERROR, last_command: 'none', zoom_in: false });
+        setStatus('Camera disabled in simulation mode', false);
+        return;
+      }
       if (state.cameraStreamPending !== 'idle' || state.cameraStreamConnected === true) return;
       const frame = document.getElementById('cameraFrame');
       if (!frame) return;
@@ -1402,8 +1576,9 @@
       frame.addEventListener('load', onLoad, { once: true });
       frame.addEventListener('error', onError, { once: true });
 
-      const sep = CAMERA_IFRAME_URL.includes('?') ? '&' : '?';
-      frame.src = `${CAMERA_IFRAME_URL}${sep}_ts=${Date.now()}`;
+      const cameraUrl = getEffectiveCameraIframeUrl();
+      const sep = cameraUrl.includes('?') ? '&' : '?';
+      frame.src = `${cameraUrl}${sep}_ts=${Date.now()}`;
       state.cameraStreamSettleTimer = window.setTimeout(() => {
         if (streamSeq !== state.cameraStreamSeq) return;
         cleanup();
@@ -1434,6 +1609,11 @@
     }
 
     function toggleCameraStream() {
+      if (!getEffectiveConnectionConfig().cameraEnabled) {
+        updateCameraStatusUi({ ok: false, error: CAMERA_DISABLED_SIM_ERROR, last_command: 'none', zoom_in: false });
+        setStatus('Camera disabled in simulation mode', false);
+        return;
+      }
       if (state.cameraStreamPending !== 'idle') return;
       if (state.cameraStreamConnected) {
         disconnectCameraStream();
@@ -2451,6 +2631,11 @@
     }
 
     function toggleSwapView() {
+      if (!getEffectiveConnectionConfig().cameraEnabled) {
+        state.primaryView = 'gps';
+        applyViewMode();
+        return;
+      }
       state.primaryView = isGpsMainView() ? 'camera' : 'gps';
       applyViewMode();
     }
@@ -2472,13 +2657,18 @@
     function applyViewMode() {
       const stage = document.getElementById('viewStage');
       const swapBtn = document.getElementById('swapViewBtn');
-      const gpsMain = isGpsMainView();
+      const cameraEnabled = getEffectiveConnectionConfig().cameraEnabled;
+      if (!cameraEnabled) {
+        state.primaryView = 'gps';
+      }
+      const gpsMain = !cameraEnabled || isGpsMainView();
 
       stage.classList.toggle('mode-camera-main', !gpsMain);
       stage.classList.toggle('mode-gps-main', gpsMain);
       swapBtn.textContent = '🔄';
       swapBtn.title = 'intercambiar camara/mapa (E)';
       swapBtn.setAttribute('aria-label', swapBtn.title);
+      swapBtn.classList.toggle('hidden', !cameraEnabled);
       applyMiniViewerPlacement();
 
       if (!gpsMain && state.goalMode) {
@@ -2560,6 +2750,18 @@
 
     function updateCameraStatusUi(payload) {
       const el = document.getElementById('cameraStatus');
+      if (!el) return;
+      if (!getEffectiveConnectionConfig().cameraEnabled) {
+        state.cameraStatus = {
+          ok: false,
+          error: CAMERA_DISABLED_SIM_ERROR,
+          last_command: 'none',
+          zoom_in: false
+        };
+        el.textContent = 'camera: disabled in sim';
+        el.className = 'status';
+        return;
+      }
       const status = payload && typeof payload === 'object' ? payload : {};
       state.cameraStatus = {
         ok: status.ok === true,
@@ -2810,12 +3012,17 @@
     }
 
     function send(payload, options = {}) {
+      const outbound = Object.assign({}, payload || {});
+      const op = String(outbound.op || '');
+      if (CAMERA_OPS.has(op) && !getEffectiveConnectionConfig().cameraEnabled) {
+        updateCameraStatusUi({ ok: false, error: CAMERA_DISABLED_SIM_ERROR, last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
+        setStatus('Camera disabled in simulation mode', false);
+        return null;
+      }
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
         showNoConnectionDialog();
         return null;
       }
-      const outbound = Object.assign({}, payload || {});
-      const op = String(outbound.op || '');
       const trackRequest = options.track === true
         || (options.track !== false && Object.prototype.hasOwnProperty.call(TRACKED_OP_UI, op));
       let reqId = null;
@@ -2922,7 +3129,11 @@
         setConnectButtonConnecting(false);
         setStatus(`Connected to ${url}`, true);
         send({ op: 'get_state' }, { track: false });
-        send({ op: 'get_camera_status' }, { track: false });
+        if (getEffectiveConnectionConfig().cameraEnabled) {
+          send({ op: 'get_camera_status' }, { track: false });
+        } else {
+          updateCameraStatusUi({ ok: false, error: CAMERA_DISABLED_SIM_ERROR, last_command: 'none', zoom_in: false });
+        }
       };
 
       state.ws.onclose = () => {
@@ -2942,7 +3153,11 @@
         resetNavTelemetryState();
         state.manualControl.enabled = false;
         renderManualStatus();
-        updateCameraStatusUi({ ok: false, error: 'disconnected', last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
+        if (getEffectiveConnectionConfig().cameraEnabled) {
+          updateCameraStatusUi({ ok: false, error: 'disconnected', last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
+        } else {
+          updateCameraStatusUi({ ok: false, error: CAMERA_DISABLED_SIM_ERROR, last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
+        }
         if (!userRequested && wasConnected) {
           showConnectionLostDialog();
         } else if (!userRequested && wasAttempting && !state.connectErrorDialogShown) {
@@ -3747,6 +3962,11 @@
     };
     document.getElementById('wsHost').addEventListener('keydown', connectOnEnter);
     document.getElementById('wsPort').addEventListener('keydown', connectOnEnter);
+    document.getElementById('connectionPreset').addEventListener('change', (event) => {
+      applyConnectionPreset(event.target?.value || 'real');
+    });
+    document.getElementById('wsHost').addEventListener('input', rememberCurrentConnectionFields);
+    document.getElementById('wsPort').addEventListener('input', rememberCurrentConnectionFields);
     document.getElementById('disconnectBtn').addEventListener('click', disconnectWs);
     document.getElementById('refreshBtn').addEventListener('click', () => send({ op: 'get_state' }));
     document.getElementById('saveBtn').addEventListener('click', pushLayersToServer);
@@ -3885,7 +4105,7 @@
         ArrowRight: 'right',
       };
       const arrowKey = cameraArrowByCode[code];
-      if (arrowKey) {
+      if (arrowKey && getEffectiveConnectionConfig().cameraEnabled) {
         event.preventDefault();
         state.cameraArrowKeys[arrowKey] = true;
         if (!event.repeat) {
@@ -3915,7 +4135,7 @@
           send({ op: 'get_nav_snapshot' });
           return;
         }
-        if (code === 'Minus' || code === 'NumpadSubtract') {
+        if ((code === 'Minus' || code === 'NumpadSubtract') && getEffectiveConnectionConfig().cameraEnabled) {
           event.preventDefault();
           send({ op: 'camera_zoom_toggle' });
           return;
@@ -4033,12 +4253,15 @@
       cameraFrameEl.blur();
     });
     cameraFrameEl.src = 'about:blank';
+    {
+      const storedConnection = readConnectionPresetStorage();
+      state.connectionPreset = storedConnection.preset;
+      state.connectionPresetValues = storedConnection.presets;
+    }
     initializeTrackedButtonsUi();
     setConnectButtonConnecting(false);
     setConnectionState(false);
-    renderCameraStreamUi();
-    relocateTopSections();
-    applyViewMode();
+    applyConnectionPreset(state.connectionPreset, { saveCurrent: false });
     updateManualSliderLabels();
     renderManualStatus();
     updateCameraStatusUi(state.cameraStatus);
