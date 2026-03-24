@@ -1114,12 +1114,8 @@ class WebZoneServerNode(Node):
         if not np.isfinite(linear_x) or not np.isfinite(angular_z):
             return False, "invalid manual command values"
 
-        with self._lock:
-            manual_enabled = bool(self._manual_control.get("enabled", False))
-        if not manual_enabled:
-            return False, "manual control is disabled"
-
         brake_pct_clamped = max(0, min(100, int(brake_pct)))
+
         cmd = CmdVelFinal()
         cmd.twist.linear.x = float(linear_x)
         cmd.twist.angular.z = float(angular_z)

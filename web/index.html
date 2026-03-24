@@ -3351,18 +3351,31 @@
     }
 
     function sendManualCmd(linearX, angularZ, brakePct = 0) {
-      if (!state.manualControl.enabled) return;
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+      const linear = Number(linearX || 0.0);
+      const angular = Number(angularZ || 0.0);
+      const clampedBrake = Math.max(0, Math.min(100, Math.round(Number(brakePct) || 0)));
+      const hasControlIntent =
+        Math.abs(linear) > 1e-3 ||
+        Math.abs(angular) > 1e-3 ||
+        clampedBrake > 0;
+      if (!state.manualControl.enabled && !hasControlIntent) return;
       send({
         op: 'set_manual_cmd',
-        linear_x: linearX,
-        angular_z: angularZ,
-        brake_pct: Math.max(0, Math.min(100, Math.round(Number(brakePct) || 0)))
+        linear_x: linear,
+        angular_z: angular,
+        brake_pct: clampedBrake
       });
     }
 
     function manualControlTick() {
-      if (!state.manualControl.enabled) return;
+      const hasControlIntent =
+        state.manualBrakeHeld ||
+        state.manualKeys.w ||
+        state.manualKeys.a ||
+        state.manualKeys.s ||
+        state.manualKeys.d;
+      if (!state.manualControl.enabled && !hasControlIntent) return;
 
       let targetLinear = 0.0;
       let targetAngular = 0.0;
@@ -4628,24 +4641,22 @@
         }
       }
 
-      if (!state.manualControl.enabled) return;
+      const isManualKey =
+        code === 'Space' ||
+        code === 'KeyW' ||
+        code === 'KeyA' ||
+        code === 'KeyS' ||
+        code === 'KeyD';
+      if (!isManualKey) return;
 
-      if (code === 'Space') {
-        event.preventDefault();
-        state.manualBrakeHeld = true;
-        renderManualStatus();
-        return;
-      }
-
-      if (code === 'KeyW' || code === 'KeyA' || code === 'KeyS' || code === 'KeyD') {
-        event.preventDefault();
-      }
-
+      event.preventDefault();
       if (event.repeat) return;
+      if (code === 'Space') state.manualBrakeHeld = true;
       if (code === 'KeyW') state.manualKeys.w = true;
       if (code === 'KeyA') state.manualKeys.a = true;
       if (code === 'KeyS') state.manualKeys.s = true;
       if (code === 'KeyD') state.manualKeys.d = true;
+      manualControlTick();
       renderManualStatus();
     });
 
