@@ -17,6 +17,7 @@ def generate_launch_description():
     zones_set_geojson_service = LaunchConfiguration("zones_set_geojson_service")
     zones_get_state_service = LaunchConfiguration("zones_get_state_service")
     zones_reload_service = LaunchConfiguration("zones_reload_service")
+    zones_fromll_output_frame = LaunchConfiguration("zones_fromll_output_frame")
 
     nav_set_goal_service = LaunchConfiguration("nav_set_goal_service")
     nav_cancel_goal_service = LaunchConfiguration("nav_cancel_goal_service")
@@ -52,6 +53,9 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "zones_reload_service", default_value="/zones_manager/reload_from_disk"
+            ),
+            DeclareLaunchArgument(
+                "zones_fromll_output_frame", default_value="map"
             ),
             DeclareLaunchArgument(
                 "nav_set_goal_service", default_value="/nav_command_server/set_goal_ll"
@@ -102,6 +106,8 @@ def generate_launch_description():
                 parameters=[
                     {
                         "map_frame": map_frame,
+                        "fromll_target_frame": map_frame,
+                        "fromll_output_frame": zones_fromll_output_frame,
                         "set_geojson_service": zones_set_geojson_service,
                         "get_state_service": zones_get_state_service,
                         "reload_from_disk_service": zones_reload_service,

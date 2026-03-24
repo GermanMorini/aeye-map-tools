@@ -1199,8 +1199,9 @@
     const CONNECTION_PRESET_STORAGE_KEY = 'map_tools.connection_presets.v1';
     const CAMERA_DISABLED_SIM_ERROR = 'disabled in sim';
     const CAMERA_OPS = new Set(['camera_pan', 'camera_zoom_toggle', 'get_camera_status']);
-    const GPS_MAX_ZOOM = 22;
-    const GPS_DEFAULT_ZOOM = GPS_MAX_ZOOM - 3;
+    const GPS_NATIVE_MAX_ZOOM = 19;
+    const GPS_MAX_ZOOM = 26;
+    const GPS_DEFAULT_ZOOM = GPS_NATIVE_MAX_ZOOM - 3;
     const map = L.map('map', { zoomControl: true }).setView(
       [-31.421785, -64.102448],
       GPS_DEFAULT_ZOOM
@@ -1209,6 +1210,8 @@
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {
         maxZoom: GPS_MAX_ZOOM,
+        maxNativeZoom: GPS_NATIVE_MAX_ZOOM,
+        detectRetina: false,
         attribution: 'Tiles &copy; Esri'
       }
     );
