@@ -125,3 +125,75 @@ def test_set_manual_cmd_invalid_values_still_fail() -> None:
     assert err == "invalid manual command values"
     assert node.mode_calls == 0
     assert len(node._teleop_cmd_pub.messages) == 0
+
+
+class _FakeSetDatumRequest:
+    def __init__(self) -> None:
+        self.coords = None
+
+
+class _FakeSetDatum:
+    Request = _FakeSetDatumRequest
+
+
+class _FakeDatumClient:
+    def __init__(self) -> None:
+        self.srv_name = "/datum_setter/set_datum"
+
+
+class _FakeSetDatumNode:
+    set_datum_current = WebZoneServerNode.set_datum_current
+
+    def __init__(self, response) -> None:
+        self._nav_set_datum_client = _FakeDatumClient()
+        self.request_timeout_s = 5.0
+        self._response = response
+        self.last_request = None
+
+    def _call_service(self, _client, request, _timeout_s):
+        self.last_request = request
+        return self._response
+
+
+def test_set_datum_current_sends_empty_coords_and_propagates_success() -> None:
+    original = WebZoneServerNode.set_datum_current.__globals__["SetDatum"]
+    WebZoneServerNode.set_datum_current.__globals__["SetDatum"] = _FakeSetDatum
+    try:
+        response = type(
+            "Res",
+            (),
+            {"ok": True, "error": "", "status_message": "Datum set successfully."},
+        )()
+        node = _FakeSetDatumNode(response=response)
+        ok, err = node.set_datum_current()
+        assert ok is True
+        assert "Datum set successfully." in err
+        assert isinstance(node.last_request, _FakeSetDatumRequest)
+        assert node.last_request.coords == []
+    finally:
+        WebZoneServerNode.set_datum_current.__globals__["SetDatum"] = original
+
+
+def test_set_datum_current_timeout_returns_error() -> None:
+    original = WebZoneServerNode.set_datum_current.__globals__["SetDatum"]
+    WebZoneServerNode.set_datum_current.__globals__["SetDatum"] = _FakeSetDatum
+    try:
+        node = _FakeSetDatumNode(response=None)
+        ok, err = node.set_datum_current()
+        assert ok is False
+        assert err == "set_datum timeout"
+    finally:
+        WebZoneServerNode.set_datum_current.__globals__["SetDatum"] = original
+
+
+def test_set_datum_current_error_propagates_backend_error() -> None:
+    original = WebZoneServerNode.set_datum_current.__globals__["SetDatum"]
+    WebZoneServerNode.set_datum_current.__globals__["SetDatum"] = _FakeSetDatum
+    try:
+        response = type("Res", (), {"ok": False, "error": "no GPS sample", "status_message": ""})()
+        node = _FakeSetDatumNode(response=response)
+        ok, err = node.set_datum_current()
+        assert ok is False
+        assert err == "no GPS sample"
+    finally:
+        WebZoneServerNode.set_datum_current.__globals__["SetDatum"] = original

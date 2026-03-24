@@ -1126,6 +1126,7 @@
               <button id="mapToolAreaBtn" class="secondary" type="button" title="Area: measure polygon area and perimeter" aria-label="Area measure polygon">📐</button>
               <button id="mapToolInspectBtn" class="secondary" type="button" title="Inspect: show and copy map coordinates" aria-label="Inspect coordinates">📍</button>
               <button id="mapToolCenterRobotBtn" class="secondary" type="button" title="centrar vista en robot" aria-label="centrar vista en robot">🎯</button>
+              <button id="mapToolSetDatumBtn" class="secondary" type="button" title="set datum con posicion actual del robot" aria-label="set datum con posicion actual del robot">🧲</button>
               <button id="mapToolCloseBtn" class="secondary" type="button" title="Close: exit map tool mode" aria-label="Close map tools">❌</button>
             </div>
           </div>
@@ -1523,6 +1524,11 @@
       },
       set_manual_mode: {
         buttons: {}
+      },
+      set_datum: {
+        buttons: {
+          mapToolSetDatumBtn: { pending: '⏳' }
+        }
       },
       start_rosbag: {
         buttons: {
@@ -2092,8 +2098,9 @@
       const areaBtn = document.getElementById('mapToolAreaBtn');
       const inspectBtn = document.getElementById('mapToolInspectBtn');
       const centerRobotBtn = document.getElementById('mapToolCenterRobotBtn');
+      const setDatumBtn = document.getElementById('mapToolSetDatumBtn');
       const closeBtn = document.getElementById('mapToolCloseBtn');
-      if (!toolbar || !rulerBtn || !areaBtn || !inspectBtn || !centerRobotBtn || !closeBtn) return;
+      if (!toolbar || !rulerBtn || !areaBtn || !inspectBtn || !centerRobotBtn || !setDatumBtn || !closeBtn) return;
 
       const gpsMain = isGpsMainView();
       toolbar.style.display = gpsMain ? '' : 'none';
@@ -2107,6 +2114,7 @@
       areaBtn.disabled = disableAll;
       inspectBtn.disabled = disableAll;
       centerRobotBtn.disabled = disableAll || !state.robotMarker;
+      setDatumBtn.disabled = disableAll;
       closeBtn.disabled = disableAll || !isMapToolActive();
     }
 
@@ -3825,6 +3833,12 @@
             goalStatusEl.textContent = `Manual command failed: ${msg.error || 'error'}`;
             goalStatusEl.className = 'status bad';
           }
+        } else if (msg.request === 'set_datum') {
+          if (msg.ok) {
+            setStatus(`Datum actualizado${msg.error ? `: ${msg.error}` : ''}`, true);
+          } else {
+            setStatus(`Set datum failed: ${msg.error || 'error'}`, false);
+          }
         } else if (msg.request === 'save_waypoints_file') {
           if (msg.ok) {
             const count = Number(msg.waypoint_count || state.goalWaypoints.length || 0);
@@ -4483,6 +4497,9 @@
     });
     document.getElementById('mapToolCenterRobotBtn').addEventListener('click', () => {
       centerMapOnRobot();
+    });
+    document.getElementById('mapToolSetDatumBtn').addEventListener('click', () => {
+      send({ op: 'set_datum' });
     });
     document.getElementById('mapToolCloseBtn').addEventListener('click', () => {
       deactivateMapTool({ clear: true });

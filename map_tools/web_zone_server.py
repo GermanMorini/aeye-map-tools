@@ -36,6 +36,7 @@ from interfaces.srv import (
     GetZonesState,
     SetManualMode,
     SetNavGoalLL,
+    SetDatum,
     SetZonesGeoJson,
 )
 from .waypoints_file_utils import load_waypoints_yaml_file, save_waypoints_yaml_file
@@ -121,6 +122,7 @@ class WebZoneServerNode(Node):
         self.declare_parameter("nav_cancel_goal_service", "/nav_command_server/cancel_goal")
         self.declare_parameter("nav_brake_service", "/nav_command_server/brake")
         self.declare_parameter("nav_set_manual_mode_service", "/nav_command_server/set_manual_mode")
+        self.declare_parameter("nav_set_datum_service", "/datum_setter/set_datum")
         self.declare_parameter("nav_get_state_service", "/nav_command_server/get_state")
         self.declare_parameter("teleop_cmd_topic", "/cmd_vel_teleop")
 
@@ -168,6 +170,7 @@ class WebZoneServerNode(Node):
         self.nav_set_manual_mode_service = str(
             self.get_parameter("nav_set_manual_mode_service").value
         )
+        self.nav_set_datum_service = str(self.get_parameter("nav_set_datum_service").value)
         self.nav_get_state_service = str(self.get_parameter("nav_get_state_service").value)
         self.teleop_cmd_topic = str(self.get_parameter("teleop_cmd_topic").value)
 
@@ -259,6 +262,9 @@ class WebZoneServerNode(Node):
         self._nav_set_manual_mode_client = self.create_client(
             SetManualMode, self.nav_set_manual_mode_service
         )
+        self._nav_set_datum_client = self.create_client(
+            SetDatum, self.nav_set_datum_service
+        )
         self._teleop_cmd_pub = self.create_publisher(CmdVelFinal, self.teleop_cmd_topic, 10)
         self._nav_get_state_client = self.create_client(GetNavState, self.nav_get_state_service)
         self._nav_snapshot_client = self.create_client(GetNavSnapshot, self.nav_snapshot_service)
@@ -273,6 +279,7 @@ class WebZoneServerNode(Node):
             "Web gateway ready "
             f"(ws={self.ws_host}:{self.ws_port}, zones_set={self.zones_set_geojson_service}, "
             f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service}, "
+            f"set_datum={self.nav_set_datum_service}, "
             f"nav_events={self.nav_events_topic}, diagnostics={self.diagnostics_topic}, "
             f"rosbag_dir={self.rosbag_output_dir}, "
             f"camera_pan={self.camera_pan_service}, camera_zoom_toggle={self.camera_zoom_toggle_service}, "
@@ -1130,6 +1137,24 @@ class WebZoneServerNode(Node):
 
         return True, ""
 
+    def set_datum_current(self) -> Tuple[bool, str]:
+        req = SetDatum.Request()
+        req.coords = []
+        res = self._call_service(self._nav_set_datum_client, req, self.request_timeout_s)
+        if res is None:
+            return False, "set_datum timeout"
+
+        ok = bool(getattr(res, "ok", False))
+        error = str(getattr(res, "error", "") or "")
+        status_message = str(getattr(res, "status_message", "") or "")
+        if ok:
+            return True, status_message
+        if error:
+            return False, error
+        if status_message:
+            return False, status_message
+        return False, "set_datum failed"
+
     def get_nav_snapshot(self) -> Tuple[bool, str, Dict[str, Any]]:
         started = time.perf_counter()
         req = GetNavSnapshot.Request()
@@ -1565,6 +1590,17 @@ class WebSocketApi:
             )
             if ok:
                 await self.node._broadcast(self.node.snapshot_state())
+            return
+
+        if op == "set_datum":
+            ok, err = await asyncio.to_thread(self.node.set_datum_current)
+            await self._send_ack(
+                ws,
+                "set_datum",
+                ok,
+                err,
+                client_req_id=client_req_id,
+            )
             return
 
         if op == "set_manual_cmd":
