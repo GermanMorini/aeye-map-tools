@@ -9,6 +9,7 @@ def generate_launch_description():
     ws_host = LaunchConfiguration("ws_host")
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
+    odom_topic = LaunchConfiguration("odom_topic")
     map_frame = LaunchConfiguration("map_frame")
     launch_zones_manager = LaunchConfiguration("launch_zones_manager")
     launch_nav_command_server = LaunchConfiguration("launch_nav_command_server")
@@ -40,6 +41,7 @@ def generate_launch_description():
             DeclareLaunchArgument("ws_host", default_value="0.0.0.0"),
             DeclareLaunchArgument("ws_port", default_value="8766"),
             DeclareLaunchArgument("gps_topic", default_value="/gps/fix"),
+            DeclareLaunchArgument("odom_topic", default_value="/odometry/local"),
             DeclareLaunchArgument("map_frame", default_value="map"),
             DeclareLaunchArgument("launch_zones_manager", default_value="true"),
             DeclareLaunchArgument("launch_nav_command_server", default_value="true"),
@@ -150,6 +152,7 @@ def generate_launch_description():
                         "ws_host": ws_host,
                         "ws_port": ws_port,
                         "gps_topic": gps_topic,
+                        "odom_topic": odom_topic,
                         "map_frame": map_frame,
                         "zones_set_geojson_service": zones_set_geojson_service,
                         "zones_get_state_service": zones_get_state_service,
