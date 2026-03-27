@@ -867,6 +867,10 @@
                 </span>
                 <span class="btn-label">Disconnect</span>
               </button>
+              <button id="openGpsLivePrecisionBtn" class="secondary" type="button">
+                <span class="btn-icon" aria-hidden="true">📡</span>
+                <span class="btn-label">RTK Live</span>
+              </button>
             </div>
           </div>
         </section>
@@ -1064,6 +1068,7 @@
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
   <script>
     const CAMERA_IFRAME_URL = 'http://100.111.4.7:8889/cam3/';
+    const GPS_LIVE_PRECISION_URL = 'file:///home/franco/final-borrador/gps_live_precision.html';
     const GPS_MAX_ZOOM = 22;
     const GPS_DEFAULT_ZOOM = GPS_MAX_ZOOM - 3;
     const map = L.map('map', { zoomControl: true }).setView(
@@ -3772,6 +3777,13 @@
     document.getElementById('wsHost').addEventListener('keydown', connectOnEnter);
     document.getElementById('wsPort').addEventListener('keydown', connectOnEnter);
     document.getElementById('disconnectBtn').addEventListener('click', disconnectWs);
+    document.getElementById('openGpsLivePrecisionBtn').addEventListener('click', () => {
+      const popup = window.open(GPS_LIVE_PRECISION_URL, '_blank', 'noopener');
+      if (!popup) {
+        window.location.href = GPS_LIVE_PRECISION_URL;
+      }
+      setStatus('RTK live page opened', true);
+    });
     document.getElementById('refreshBtn').addEventListener('click', () => {
       send({ op: 'get_state' });
       send({ op: 'get_joystick_config' }, { track: false });
