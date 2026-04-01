@@ -21,3 +21,25 @@ def test_no_go_editor_launch_exposes_nav_set_datum_service_for_web_gateway() -> 
         "            )"
     ) in launch_contents
     assert '"nav_set_datum_service": nav_set_datum_service' in launch_contents
+
+
+def test_no_go_editor_launch_exposes_sensor_info_topics_for_web_gateway() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "no_go_editor.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("imu_topic", default_value="/imu/data")' in launch_contents
+    assert 'DeclareLaunchArgument("velocity_topic", default_value="/velocity")' in launch_contents
+    assert 'DeclareLaunchArgument("fix_type_topic", default_value="/gps/fix_type")' in launch_contents
+    assert 'DeclareLaunchArgument("rtk_status_topic", default_value="/gps/rtk_status")' in launch_contents
+    assert 'DeclareLaunchArgument("rtcm_age_topic", default_value="/gps/rtcm_age_s")' in launch_contents
+    assert 'DeclareLaunchArgument("rtcm_count_topic", default_value="/gps/rtcm_received_count")' in launch_contents
+    assert 'DeclareLaunchArgument("gps_raw_topic", default_value="/mavros_node/gps1/raw")' in launch_contents
+    assert '"imu_topic": imu_topic' in launch_contents
+    assert '"velocity_topic": velocity_topic' in launch_contents
+    assert '"fix_type_topic": fix_type_topic' in launch_contents
+    assert '"rtk_status_topic": rtk_status_topic' in launch_contents
+    assert '"rtcm_age_topic": rtcm_age_topic' in launch_contents
+    assert '"rtcm_count_topic": rtcm_count_topic' in launch_contents
+    assert '"gps_raw_topic": gps_raw_topic' in launch_contents
+    assert '"rtk_source_status_topic": rtk_source_status_topic' in launch_contents
+    assert '"nav_get_datum_service": nav_get_datum_service' in launch_contents

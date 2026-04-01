@@ -1,8 +1,15 @@
+import asyncio
 import threading
 
 from diagnostic_msgs.msg import DiagnosticStatus
 
-from map_tools.web_zone_server import ROSBAG_TOPIC_PROFILES, WebZoneServerNode
+from map_tools.web_zone_server import (
+    ROSBAG_TOPIC_PROFILES,
+    SensorInfoSession,
+    WebZoneServerNode,
+    _estimated_precision_for_fix,
+    _fix_quality_class,
+)
 
 
 def _diag_level(value) -> int:
@@ -197,3 +204,177 @@ def test_set_datum_current_error_propagates_backend_error() -> None:
         assert err == "no GPS sample"
     finally:
         WebZoneServerNode.set_datum_current.__globals__["SetDatum"] = original
+
+
+def test_sensor_info_fix_quality_and_precision_mapping_matches_contract() -> None:
+    assert _fix_quality_class("RTK_FIXED") == "good"
+    assert _fix_quality_class("RTK_FLOAT") == "warn"
+    assert _fix_quality_class("DGPS") == "warn"
+    assert _fix_quality_class("3D_FIX") == "bad"
+    assert _estimated_precision_for_fix(6) == 0.02
+    assert _estimated_precision_for_fix(5) == 0.3
+    assert _estimated_precision_for_fix(4) == 0.5
+    assert _estimated_precision_for_fix(3) == 3.0
+    assert _estimated_precision_for_fix(2) is None
+
+
+class _FakeSensorInfoNode:
+    def __init__(self, loop) -> None:
+        self._loop = loop
+        self.info_gps_topic = "/gps/fix"
+        self.info_fix_type_topic = "/gps/fix_type"
+        self.info_rtk_status_topic = "/gps/rtk_status"
+        self.info_rtcm_age_topic = "/gps/rtcm_age_s"
+        self.info_rtcm_count_topic = "/gps/rtcm_received_count"
+        self.info_rtk_source_status_topic = "/gps/rtk_source/status_json"
+        self.info_gps_raw_topic = "/mavros_node/gps1/raw"
+        self.info_imu_topic = "/imu/data"
+        self.info_velocity_topic = "/velocity"
+        self.info_odom_topic = "/odometry/local"
+        self.created = []
+        self.destroyed = []
+        self.sent_payloads = []
+        self._topics_catalog = [
+            {
+                "name": "/parameter_events",
+                "types": ["rcl_interfaces/msg/ParameterEvent"],
+                "publisher_count": 1,
+                "subscriber_count": 0,
+            },
+            {
+                "name": "/topic_alpha",
+                "types": ["std_msgs/msg/String"],
+                "publisher_count": 2,
+                "subscriber_count": 1,
+            },
+            {
+                "name": "/topic_beta",
+                "types": ["std_msgs/msg/String"],
+                "publisher_count": 1,
+                "subscriber_count": 1,
+            },
+        ]
+
+    def create_subscription(self, msg_type, topic, callback, qos, raw=False):
+        token = (msg_type, topic, callback, qos, raw)
+        self.created.append(token)
+        return token
+
+    def destroy_subscription(self, token):
+        self.destroyed.append(token)
+
+    async def send_ws_json(self, _ws, payload):
+        self.sent_payloads.append(payload)
+        return True
+
+    def get_datum_info(self):
+        return {
+            "ok": True,
+            "already_set": True,
+            "has_current_gps": True,
+            "gps_is_rtk": True,
+            "current_gps_lat": -31.0,
+            "current_gps_lon": -64.0,
+            "datum_lat": -31.0,
+            "datum_lon": -64.0,
+            "last_set_epoch_ms": 0,
+            "last_set_source": "service_current_gps",
+            "last_set_with_rtk": True,
+        }
+
+    def get_topics_catalog(self):
+        return [dict(item) for item in self._topics_catalog]
+
+
+async def _configure_sensor_info_session():
+    loop = asyncio.get_running_loop()
+    node = _FakeSensorInfoNode(loop)
+    session = SensorInfoSession(node, ws=object())
+
+    payload_general = session.configure(enabled=True, tab="general", interval_s=0.1)
+    await asyncio.sleep(0)
+    subs_after_general = session.subscription_count()
+
+    payload_lidar = session.configure(enabled=True, tab="lidar", interval_s=0.1)
+    await asyncio.sleep(0)
+    subs_after_lidar = session.subscription_count()
+
+    session.close()
+    await asyncio.sleep(0)
+    return node, payload_general, payload_lidar, subs_after_general, subs_after_lidar
+
+
+async def _configure_topics_sensor_info_session():
+    loop = asyncio.get_running_loop()
+    node = _FakeSensorInfoNode(loop)
+    session = SensorInfoSession(node, ws=object())
+
+    payload_topics = session.configure(enabled=True, tab="topics", interval_s=0.2)
+    await asyncio.sleep(0)
+    subs_without_topic = session.subscription_count()
+
+    payload_topic_alpha = session.configure(
+        enabled=True,
+        tab="topics",
+        interval_s=0.2,
+        topic_name="/topic_alpha",
+    )
+    await asyncio.sleep(0)
+    subs_with_topic = session.subscription_count()
+
+    payload_topic_beta = session.configure(
+        enabled=True,
+        tab="topics",
+        interval_s=0.2,
+        topic_name="/topic_beta",
+    )
+    await asyncio.sleep(0)
+    subs_after_switch = session.subscription_count()
+
+    session.close()
+    await asyncio.sleep(0)
+    return (
+        node,
+        payload_topics,
+        payload_topic_alpha,
+        payload_topic_beta,
+        subs_without_topic,
+        subs_with_topic,
+        subs_after_switch,
+    )
+
+
+def test_sensor_info_session_switches_tabs_and_drops_dynamic_subscriptions() -> None:
+    node, payload_general, payload_lidar, subs_after_general, subs_after_lidar = asyncio.run(
+        _configure_sensor_info_session()
+    )
+
+    assert payload_general["implemented"] is True
+    assert subs_after_general > 0
+    assert payload_lidar["implemented"] is False
+    assert subs_after_lidar == 0
+    assert len(node.destroyed) >= subs_after_general
+    assert any(item.get("op") == "sensor_info" and item.get("tab") == "lidar" for item in node.sent_payloads)
+
+
+def test_sensor_info_topics_session_creates_single_dynamic_subscription_per_selected_topic() -> None:
+    (
+        node,
+        payload_topics,
+        payload_topic_alpha,
+        payload_topic_beta,
+        subs_without_topic,
+        subs_with_topic,
+        subs_after_switch,
+    ) = asyncio.run(_configure_topics_sensor_info_session())
+
+    assert payload_topics["implemented"] is True
+    assert payload_topics["topic_name"] is None
+    assert subs_without_topic == 0
+    assert payload_topic_alpha["topic_name"] == "/topic_alpha"
+    assert payload_topic_alpha["selected_type"] == "std_msgs/msg/String"
+    assert subs_with_topic == 1
+    assert payload_topic_beta["topic_name"] == "/topic_beta"
+    assert subs_after_switch == 1
+    assert len(node.destroyed) >= 1
+    assert any(item[-1] is True for item in node.created)

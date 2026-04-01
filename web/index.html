@@ -52,6 +52,7 @@
       align-items: stretch;
       gap: 12px;
       min-width: 0;
+      min-height: 0;
     }
     .visual-top-row:empty {
       display: none;
@@ -59,6 +60,7 @@
     .visual-top-row .panel-section.telemetry {
       flex: 1 1 auto;
       min-width: 0;
+      min-height: 0;
     }
     .visual-top-row .panel-section.camera {
       flex: 0 0 150px;
@@ -161,22 +163,35 @@
       background: transparent;
       padding: 0;
     }
+    .panel-section.telemetry {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+      height: clamp(250px, 32vh, 360px);
+    }
     .telemetry-feed-grid {
-      margin-top: 10px;
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
+      flex: 1 1 auto;
+      min-height: 0;
     }
     .telemetry-feed {
       min-width: 0;
+      min-height: 0;
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 8px 10px;
       background: #f8fbfe;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
     .telemetry-feed h3 {
-      margin: 0 0 6px 0;
+      margin: 0;
       font-size: 13px;
+      flex: 0 0 auto;
     }
     .telemetry-feed-list {
       list-style: none;
@@ -185,7 +200,8 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
-      max-height: 180px;
+      flex: 1 1 auto;
+      min-height: 0;
       overflow: auto;
     }
     .telemetry-feed-item {
@@ -277,6 +293,12 @@
       margin: 0;
       text-align: right;
       white-space: nowrap;
+    }
+    .connection-actions-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      width: 100%;
     }
     .row {
       display: grid;
@@ -858,6 +880,276 @@
     .debug-actions select {
       width: 100%;
     }
+    .info-modal-card {
+      width: min(1120px, 96vw);
+      max-height: 92vh;
+      min-height: min(720px, 92vh);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .info-modal-body {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 12px;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+    .info-tabs {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+    .info-tab-btn {
+      justify-content: flex-start;
+      min-height: 44px;
+      padding: 10px 12px;
+    }
+    .info-tab-btn.active {
+      background: linear-gradient(180deg, #0b6ed5, var(--accent));
+      border-color: #00488f;
+      color: #ffffff;
+    }
+    .info-panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(180deg, #ffffff, #f5faff);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: auto;
+    }
+    .info-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .info-panel-title {
+      margin: 0;
+      font-size: 18px;
+    }
+    .info-panel-status {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .info-summary-grid,
+    .info-card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .info-card {
+      background: linear-gradient(160deg, #ffffff, #f8fbff);
+      border: 1px solid #d3e0ef;
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 10px 24px rgba(17, 60, 106, 0.06);
+      min-width: 0;
+    }
+    .info-card h4 {
+      margin: 0 0 10px 0;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+    }
+    .info-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 6px 0;
+      border-bottom: 1px dashed rgba(18, 32, 47, 0.14);
+    }
+    .info-row:last-child {
+      border-bottom: none;
+    }
+    .info-row-label {
+      color: var(--muted);
+      font-size: 12px;
+      min-width: 0;
+    }
+    .info-row-value {
+      min-width: 0;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1;
+      overflow-wrap: anywhere;
+    }
+    .info-placeholder {
+      flex: 1 1 auto;
+      min-height: 220px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px dashed #9eb2c8;
+      border-radius: 12px;
+      background: rgba(248, 251, 255, 0.9);
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+      padding: 20px;
+    }
+    .info-fix-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .info-fix-badge.good {
+      background: rgba(15, 122, 60, 0.12);
+      border-color: rgba(15, 122, 60, 0.22);
+      color: var(--good);
+    }
+    .info-fix-badge.warn {
+      background: rgba(181, 71, 8, 0.12);
+      border-color: rgba(181, 71, 8, 0.22);
+      color: var(--warn);
+    }
+    .info-fix-badge.bad {
+      background: rgba(180, 35, 24, 0.12);
+      border-color: rgba(180, 35, 24, 0.22);
+      color: var(--bad);
+    }
+    .info-stepper-row {
+      margin-top: auto;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-top: 8px;
+    }
+    .info-stepper-row label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .info-stepper-row input {
+      width: 96px;
+      min-width: 96px;
+      text-align: right;
+    }
+    .info-error {
+      border: 1px solid rgba(180, 35, 24, 0.35);
+      background: #fef3f2;
+      color: var(--bad);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+    .info-topics-layout {
+      display: grid;
+      grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+      gap: 12px;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+    .info-topics-sidebar,
+    .info-topics-content {
+      min-height: 0;
+      border: 1px solid #d3e0ef;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.92);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .info-topics-search {
+      width: 100%;
+    }
+    .info-topics-list {
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .info-topic-item {
+      display: flex;
+      text-align: left;
+      align-items: flex-start;
+      justify-content: flex-start;
+      flex-direction: column;
+      gap: 4px;
+      min-height: 64px;
+      height: auto;
+      padding: 10px 12px;
+      line-height: 1.25;
+      white-space: normal;
+      overflow: hidden;
+    }
+    .info-topic-item.active {
+      background: linear-gradient(180deg, #0b6ed5, var(--accent));
+      border-color: #00488f;
+      color: #ffffff;
+    }
+    .info-topic-item-name {
+      display: block;
+      width: 100%;
+      font-weight: 700;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .info-topic-item-meta {
+      display: block;
+      width: 100%;
+      font-size: 11px;
+      opacity: 0.8;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .info-topics-content-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .info-topics-copy-btn {
+      width: auto;
+      min-width: 110px;
+    }
+    .info-topics-stream {
+      min-height: 0;
+      flex: 1 1 auto;
+      overflow: auto;
+      border: 1px solid #d3e0ef;
+      border-radius: 12px;
+      background: #f8fbfe;
+      padding: 0;
+    }
+    .info-topics-stream pre {
+      margin: 0;
+      min-height: 100%;
+      max-height: none;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      padding: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+    }
+    .info-topics-empty {
+      min-height: 220px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--muted);
+      padding: 20px;
+    }
     #snapshotImage {
       width: 100%;
       border: 1px solid #5d7590;
@@ -925,6 +1217,16 @@
       .panel-section.mini-viewer {
         display: none !important;
       }
+      .info-modal-body {
+        grid-template-columns: 1fr;
+      }
+      .info-tabs {
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+      .info-topics-layout {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -948,7 +1250,7 @@
               <input id="wsHost" value="100.111.4.7" placeholder="Host" />
               <input id="wsPort" value="8766" placeholder="Port" />
             </div>
-            <div class="row">
+            <div class="connection-actions-grid">
               <button id="connectBtn">
                 <span class="btn-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2zm-1 14-4-4 1.41-1.41L11 13.17l4.59-4.58L17 10z"/></svg>
@@ -963,7 +1265,11 @@
               </button>
               <button id="menuBtn" class="secondary">
                 <span class="btn-icon" aria-hidden="true">☰</span>
-                <span class="btn-label">Menu</span>
+                <span class="btn-label">Record</span>
+              </button>
+              <button id="infoBtn" class="secondary">
+                <span class="btn-icon" aria-hidden="true">ⓘ</span>
+                <span class="btn-label">Info</span>
               </button>
             </div>
           </div>
@@ -1154,7 +1460,7 @@
   <div id="menuModal" class="modal-backdrop">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>Menu</h3>
+        <h3>Record</h3>
         <div class="modal-shortcuts">Esc: Close</div>
         <div class="modal-actions">
           <button id="menuCloseBtn" class="secondary">Close</button>
@@ -1187,6 +1493,28 @@
             <button id="stopRosbagBtn" class="danger">Stop Bag</button>
           </div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="infoModal" class="modal-backdrop">
+    <div class="modal-card info-modal-card">
+      <div class="modal-header">
+        <h3>Info</h3>
+        <div class="modal-shortcuts">Esc: Close</div>
+        <div class="modal-actions">
+          <button id="infoCloseBtn" class="secondary">Close</button>
+        </div>
+      </div>
+      <div class="info-modal-body">
+        <div id="infoTabs" class="info-tabs">
+          <button id="infoTabGeneralBtn" class="secondary info-tab-btn" type="button" data-info-tab="general">General</button>
+          <button id="infoTabTopicsBtn" class="secondary info-tab-btn" type="button" data-info-tab="topics">Topics</button>
+          <button id="infoTabPixhawkGpsBtn" class="secondary info-tab-btn" type="button" data-info-tab="pixhawk_gps">Pixhawk/GPS</button>
+          <button id="infoTabLidarBtn" class="secondary info-tab-btn" type="button" data-info-tab="lidar">LiDAR</button>
+          <button id="infoTabCameraBtn" class="secondary info-tab-btn" type="button" data-info-tab="camera">Camara</button>
+        </div>
+        <div id="infoPanel" class="info-panel"></div>
       </div>
     </div>
   </div>
@@ -1288,6 +1616,55 @@
         available_profiles: ['core', 'full_nav2']
       },
       cameraStatus: { ok: false, error: 'camera status unavailable', last_command: 'none', zoom_in: false },
+      sensorInfo: {
+        open: false,
+        activeTab: 'general',
+        intervals: {
+          general: 0.1,
+          topics: 0.1,
+          pixhawk_gps: 0.1,
+          lidar: 0.1,
+          camera: 0.1
+        },
+        loading: {
+          general: false,
+          topics: false,
+          pixhawk_gps: false,
+          lidar: false,
+          camera: false
+        },
+        payloads: {
+          general: null,
+          topics: null,
+          pixhawk_gps: null,
+          lidar: null,
+          camera: null
+        },
+        errors: {
+          general: '',
+          topics: '',
+          pixhawk_gps: '',
+          lidar: '',
+          camera: ''
+        },
+        implemented: {
+          general: true,
+          topics: true,
+          pixhawk_gps: true,
+          lidar: false,
+          camera: false
+        },
+        topics: {
+          search: '',
+          pendingTopic: '',
+          selectedTopic: '',
+          selectedType: '',
+          history: [],
+          copiableText: '',
+          truncated: false,
+          catalog: []
+        }
+      },
       cameraStreamConnected: false,
       cameraStreamPending: 'idle',
       cameraStreamSettleTimer: null,
@@ -1540,6 +1917,13 @@
           stopRosbagBtn: { pending: 'Stopping...' }
         }
       }
+    };
+    const SENSOR_INFO_TAB_LABELS = {
+      general: 'General',
+      topics: 'Topics',
+      pixhawk_gps: 'Pixhawk/GPS',
+      lidar: 'LiDAR',
+      camera: 'Camara'
     };
 
     function setStatus(text, ok = null) {
@@ -3208,6 +3592,651 @@
       }
     }
 
+    function escapeHtml(value) {
+      return String(value == null ? '' : value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function clampSensorInfoInterval(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return 0.1;
+      return Math.min(5.0, Math.max(0.1, Math.round(numeric * 10) / 10));
+    }
+
+    function formatSensorInfoNumber(value, digits = 3) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return '--';
+      return numeric.toFixed(digits);
+    }
+
+    function formatSensorInfoCoordinate(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return '--';
+      return numeric.toFixed(7);
+    }
+
+    function formatSensorInfoTimestamp(epochMs) {
+      const numeric = Number(epochMs);
+      if (!Number.isFinite(numeric) || numeric <= 0) return 'n/a';
+      return new Date(numeric).toLocaleString();
+    }
+
+    function formatSensorInfoPrecision(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0) return 'sin precision confiable';
+      if (numeric < 1.0) {
+        return `${Math.round(numeric * 100)} cm`;
+      }
+      return `${numeric.toFixed(numeric >= 10 ? 0 : 1)} m`;
+    }
+
+    function infoRowHtml(label, valueHtml, options = {}) {
+      const safeLabel = escapeHtml(label);
+      const safeValue = options.rawValue === true ? valueHtml : escapeHtml(valueHtml);
+      return (
+        `<div class="info-row">` +
+          `<div class="info-row-label">${safeLabel}</div>` +
+          `<div class="info-row-value">${safeValue}</div>` +
+        `</div>`
+      );
+    }
+
+    function infoCardHtml(title, rowsHtml) {
+      return `<section class="info-card"><h4>${escapeHtml(title)}</h4>${rowsHtml.join('')}</section>`;
+    }
+
+    function sensorInfoStepperHtml(tab, disabled) {
+      const value = clampSensorInfoInterval(state.sensorInfo.intervals[tab]);
+      return (
+        `<div class="info-stepper-row">` +
+          `<label for="infoRefreshIntervalInput">Refresh (s)</label>` +
+          `<input id="infoRefreshIntervalInput" type="number" min="0.1" max="5.0" step="0.1" value="${value.toFixed(1)}"${disabled ? ' disabled' : ''} />` +
+        `</div>`
+      );
+    }
+
+    function copyTextToClipboard(text) {
+      const value = String(text || '');
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        return navigator.clipboard.writeText(value);
+      }
+      return new Promise((resolve, reject) => {
+        try {
+          const textarea = document.createElement('textarea');
+          textarea.value = value;
+          textarea.setAttribute('readonly', 'readonly');
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
+
+    function renderSensorInfoTabsUi() {
+      document.querySelectorAll('[data-info-tab]').forEach((button) => {
+        const tab = String(button.dataset.infoTab || '');
+        button.classList.toggle('active', tab === state.sensorInfo.activeTab);
+      });
+    }
+
+    function renderSensorInfoTopicsPanel(payload) {
+      const snapshot = payload && payload.snapshot && typeof payload.snapshot === 'object'
+        ? payload.snapshot
+        : {};
+      const topicsState = state.sensorInfo.topics;
+      const catalog = Array.isArray(snapshot.topics_catalog) ? snapshot.topics_catalog.slice() : [];
+      catalog.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+      const query = String(topicsState.search || '').trim().toLowerCase();
+      const filteredCatalog = query
+        ? catalog.filter((item) => String(item.name || '').toLowerCase().includes(query))
+        : catalog;
+      const selectedTopic = String(
+        topicsState.pendingTopic || topicsState.selectedTopic || snapshot.selected_topic || ''
+      );
+      const selectedType = String(topicsState.selectedType || snapshot.selected_type || '');
+      const historyText = String(topicsState.copiableText || snapshot.history_text || '');
+      const copyDisabled = historyText.length === 0;
+
+      const listHtml = filteredCatalog.length === 0
+        ? '<div class="info-topics-empty">No hay topics que coincidan con la busqueda.</div>'
+        : filteredCatalog.map((item) => {
+          const name = String(item.name || '');
+          const types = Array.isArray(item.types) ? item.types.map((entry) => String(entry)).join(', ') : 'n/a';
+          const publishers = Number.isFinite(Number(item.publisher_count)) ? `pub=${Number(item.publisher_count)}` : 'pub=n/a';
+          const subscribers = Number.isFinite(Number(item.subscriber_count)) ? `sub=${Number(item.subscriber_count)}` : 'sub=n/a';
+          const activeClass = name === selectedTopic ? ' active' : '';
+          return (
+            `<button class="secondary info-topic-item${activeClass}" type="button" data-topic-name="${escapeHtml(name)}">` +
+              `<span class="info-topic-item-name">${escapeHtml(name)}</span>` +
+              `<span class="info-topic-item-meta">${escapeHtml(types)}</span>` +
+              `<span class="info-topic-item-meta">${escapeHtml(`${publishers} · ${subscribers}`)}</span>` +
+            `</button>`
+          );
+        }).join('');
+
+      const streamHtml = historyText
+        ? `<pre>${escapeHtml(historyText)}</pre>`
+        : '<div class="info-topics-empty">Selecciona un topic para ver su stream en tiempo real.</div>';
+
+      const headerTitle = selectedTopic || 'Topics';
+      const headerType = selectedType ? ` · ${selectedType}` : '';
+      const truncatedBanner = topicsState.truncated === true
+        ? '<div class="info-error">Historial truncado por limites de memoria.</div>'
+        : '';
+
+      return (
+        `<div class="info-panel-header">` +
+          `<h4 class="info-panel-title">Topics</h4>` +
+          `<div class="info-panel-status">Catalogo ROS 2 completo · refresh cada ${clampSensorInfoInterval(payload.interval_s).toFixed(1)} s</div>` +
+        `</div>` +
+        `${snapshot.error ? `<div class="info-error">${escapeHtml(snapshot.error)}</div>` : ''}` +
+        `${truncatedBanner}` +
+        `<div class="info-topics-layout">` +
+          `<div class="info-topics-sidebar">` +
+            `<input id="infoTopicsSearchInput" class="info-topics-search" type="search" placeholder="Buscar topic..." value="${escapeHtml(topicsState.search || '')}" />` +
+            `<div class="info-topics-list">${listHtml}</div>` +
+          `</div>` +
+          `<div class="info-topics-content">` +
+            `<div class="info-topics-content-header">` +
+              `<div class="info-panel-status">${escapeHtml(headerTitle + headerType)}</div>` +
+              `<button id="infoTopicsCopyBtn" class="secondary info-topics-copy-btn" type="button"${copyDisabled ? ' disabled' : ''}>Copy</button>` +
+            `</div>` +
+            `<div class="info-topics-stream">${streamHtml}</div>` +
+          `</div>` +
+        `</div>` +
+        sensorInfoStepperHtml('topics', false)
+      );
+    }
+
+    function renderSensorInfoGeneralPanel(payload) {
+      const snapshot = payload && payload.snapshot && typeof payload.snapshot === 'object'
+        ? payload.snapshot
+        : {};
+      const datum = snapshot.datum || {};
+      const gps = snapshot.gps || {};
+      const gpsMeta = snapshot.gps_meta || {};
+      const rtkState = snapshot.rtk_source_state || {};
+      const fixName = String(gpsMeta.fix_type_name || 'UNKNOWN');
+      const fixClass = String(gpsMeta.fix_quality_class || 'bad');
+      const precisionLabel = formatSensorInfoPrecision(gpsMeta.estimated_precision_m);
+      const currentGpsAvailable = datum.has_current_gps === true
+        && Number.isFinite(Number(datum.current_gps_lat))
+        && Number.isFinite(Number(datum.current_gps_lon));
+
+      const overviewCard = infoCardHtml('General', [
+        infoRowHtml(
+          'GPS fix',
+          `<span class="info-fix-badge ${escapeHtml(fixClass)}">${escapeHtml(fixName)}</span>`,
+          { rawValue: true }
+        ),
+        infoRowHtml('Precision', precisionLabel),
+        infoRowHtml('Datum status', datum.already_set === true ? 'set' : 'unset'),
+        infoRowHtml('Current GPS', currentGpsAvailable ? `${formatSensorInfoCoordinate(datum.current_gps_lat)}, ${formatSensorInfoCoordinate(datum.current_gps_lon)}` : 'n/a'),
+        infoRowHtml('RTK source', rtkState.active_source_label || rtkState.active_source_id || 'n/a'),
+      ]);
+
+      const datumCard = infoCardHtml('Datum', [
+        infoRowHtml('Latitude', formatSensorInfoCoordinate(datum.datum_lat)),
+        infoRowHtml('Longitude', formatSensorInfoCoordinate(datum.datum_lon)),
+        infoRowHtml('Source', datum.last_set_source || 'n/a'),
+        infoRowHtml('Last set', formatSensorInfoTimestamp(datum.last_set_epoch_ms)),
+        infoRowHtml('Set with RTK', datum.last_set_with_rtk === true ? 'yes' : 'no'),
+        infoRowHtml('Datum service', datum.ok === true ? 'ok' : (datum.error || 'error')),
+      ]);
+
+      const rtkCard = infoCardHtml('RTK Source', [
+        infoRowHtml('Connected', rtkState.connected === true ? 'yes' : 'no'),
+        infoRowHtml('Label', rtkState.active_source_label || 'n/a'),
+        infoRowHtml('RTCM age', Number.isFinite(Number(rtkState.rtcm_age_s)) ? `${Number(rtkState.rtcm_age_s).toFixed(1)} s` : 'n/a'),
+        infoRowHtml('Received count', Number.isFinite(Number(rtkState.received_count)) ? String(Number(rtkState.received_count)) : 'n/a'),
+        infoRowHtml('Last error', rtkState.last_error || 'none'),
+      ]);
+
+      return (
+        `<div class="info-panel-header">` +
+          `<h4 class="info-panel-title">General</h4>` +
+          `<div class="info-panel-status">Vista activa · refresh cada ${clampSensorInfoInterval(payload.interval_s).toFixed(1)} s</div>` +
+        `</div>` +
+        `<div class="info-summary-grid">${overviewCard}${datumCard}${rtkCard}</div>` +
+        sensorInfoStepperHtml('general', false)
+      );
+    }
+
+    function renderSensorInfoPixhawkPanel(payload) {
+      const snapshot = payload && payload.snapshot && typeof payload.snapshot === 'object'
+        ? payload.snapshot
+        : {};
+      const imu = snapshot.imu || {};
+      const gps = snapshot.gps || {};
+      const gpsMeta = snapshot.gps_meta || {};
+      const velocity = snapshot.velocity || {};
+      const odom = snapshot.odom || {};
+      const diagnostics = snapshot.diagnostics || {};
+      const topics = snapshot.topics || {};
+      const rtkState = snapshot.rtk_source_state || {};
+      const fixName = String(gpsMeta.fix_type_name || 'UNKNOWN');
+      const fixClass = String(gpsMeta.fix_quality_class || 'bad');
+
+      const imuCard = infoCardHtml('IMU (EKF)', [
+        infoRowHtml('q.w', formatSensorInfoNumber(imu.orientation && imu.orientation.w, 4)),
+        infoRowHtml('q.x', formatSensorInfoNumber(imu.orientation && imu.orientation.x, 4)),
+        infoRowHtml('q.y', formatSensorInfoNumber(imu.orientation && imu.orientation.y, 4)),
+        infoRowHtml('q.z', formatSensorInfoNumber(imu.orientation && imu.orientation.z, 4)),
+        infoRowHtml('yaw ENU', `${formatSensorInfoNumber(imu.yaw_enu_rad, 4)} rad`),
+        infoRowHtml('yaw ENU', `${formatSensorInfoNumber(imu.yaw_enu_deg, 2)} deg`),
+        infoRowHtml('ang.x', formatSensorInfoNumber(imu.angular_velocity && imu.angular_velocity.x, 4)),
+        infoRowHtml('ang.y', formatSensorInfoNumber(imu.angular_velocity && imu.angular_velocity.y, 4)),
+        infoRowHtml('ang.z', formatSensorInfoNumber(imu.angular_velocity && imu.angular_velocity.z, 4)),
+      ]);
+
+      const gpsCard = infoCardHtml('GPS', [
+        infoRowHtml('lat', formatSensorInfoCoordinate(gps.latitude)),
+        infoRowHtml('lon', formatSensorInfoCoordinate(gps.longitude)),
+        infoRowHtml('alt', `${formatSensorInfoNumber(gps.altitude, 2)} m`),
+        infoRowHtml(
+          'fix',
+          `<span class="info-fix-badge ${escapeHtml(fixClass)}">${escapeHtml(fixName)}</span>`,
+          { rawValue: true }
+        ),
+        infoRowHtml('rtk status', gpsMeta.rtk_status || 'n/a'),
+        infoRowHtml('precision', formatSensorInfoPrecision(gpsMeta.estimated_precision_m)),
+        infoRowHtml('satellites', Number.isFinite(Number(gpsMeta.satellites_visible)) ? String(Number(gpsMeta.satellites_visible)) : 'n/a'),
+        infoRowHtml('eph', Number.isFinite(Number(gpsMeta.eph)) ? String(Number(gpsMeta.eph)) : 'n/a'),
+        infoRowHtml('epv', Number.isFinite(Number(gpsMeta.epv)) ? String(Number(gpsMeta.epv)) : 'n/a'),
+        infoRowHtml('rtcm age', Number.isFinite(Number(gpsMeta.rtcm_age_s)) ? `${Number(gpsMeta.rtcm_age_s).toFixed(1)} s` : 'n/a'),
+        infoRowHtml('rtcm count', Number.isFinite(Number(gpsMeta.rtcm_received_count)) ? String(Number(gpsMeta.rtcm_received_count)) : 'n/a'),
+        infoRowHtml('rtk source', rtkState.active_source_label || rtkState.active_source_id || 'n/a'),
+      ]);
+
+      const velocityCard = infoCardHtml('Velocity', [
+        infoRowHtml('vx', `${formatSensorInfoNumber(velocity.linear && velocity.linear.x, 3)} m/s`),
+        infoRowHtml('vy', `${formatSensorInfoNumber(velocity.linear && velocity.linear.y, 3)} m/s`),
+        infoRowHtml('vz', `${formatSensorInfoNumber(velocity.linear && velocity.linear.z, 3)} m/s`),
+        infoRowHtml('yaw rate', `${formatSensorInfoNumber(velocity.angular && velocity.angular.z, 3)} rad/s`),
+      ]);
+
+      const odomCard = infoCardHtml('Odometry (EKF)', [
+        infoRowHtml('x', `${formatSensorInfoNumber(odom.position && odom.position.x, 3)} m`),
+        infoRowHtml('y', `${formatSensorInfoNumber(odom.position && odom.position.y, 3)} m`),
+        infoRowHtml('z', `${formatSensorInfoNumber(odom.position && odom.position.z, 3)} m`),
+        infoRowHtml('q.w', formatSensorInfoNumber(odom.orientation && odom.orientation.w, 4)),
+        infoRowHtml('q.x', formatSensorInfoNumber(odom.orientation && odom.orientation.x, 4)),
+        infoRowHtml('q.y', formatSensorInfoNumber(odom.orientation && odom.orientation.y, 4)),
+        infoRowHtml('q.z', formatSensorInfoNumber(odom.orientation && odom.orientation.z, 4)),
+        infoRowHtml('yaw ENU', `${formatSensorInfoNumber(odom.yaw_enu_rad, 4)} rad`),
+        infoRowHtml('yaw ENU', `${formatSensorInfoNumber(odom.yaw_enu_deg, 2)} deg`),
+      ]);
+
+      const yawCard = infoCardHtml('Yaw Diagnostics', [
+        infoRowHtml('Delta yaw', `${formatSensorInfoNumber(diagnostics.yaw_delta_deg, 2)} deg`),
+        infoRowHtml('ENU convention', '0°=E, 90°=N'),
+      ]);
+
+      const topicsCard = infoCardHtml('Topic Bindings', [
+        infoRowHtml('IMU', topics.imu || '--'),
+        infoRowHtml('GPS', topics.gps || '--'),
+        infoRowHtml('Velocity', topics.velocity || '--'),
+        infoRowHtml('Odom', topics.odom || '--'),
+        infoRowHtml('Fix type', topics.fix_type || '--'),
+        infoRowHtml('RTK status', topics.rtk_status || '--'),
+        infoRowHtml('RTCM age', topics.rtcm_age || '--'),
+        infoRowHtml('GPS raw', topics.gps_raw || '--'),
+      ]);
+
+      return (
+        `<div class="info-panel-header">` +
+          `<h4 class="info-panel-title">Pixhawk/GPS</h4>` +
+          `<div class="info-panel-status">Dashboard completo · refresh cada ${clampSensorInfoInterval(payload.interval_s).toFixed(1)} s</div>` +
+        `</div>` +
+        `<div class="info-card-grid">${imuCard}${gpsCard}${velocityCard}${odomCard}${yawCard}${topicsCard}</div>` +
+        sensorInfoStepperHtml('pixhawk_gps', false)
+      );
+    }
+
+    function renderSensorInfoUnimplementedPanel(tab) {
+      return (
+        `<div class="info-panel-header">` +
+          `<h4 class="info-panel-title">${escapeHtml(SENSOR_INFO_TAB_LABELS[tab] || tab)}</h4>` +
+          `<div class="info-panel-status">No implementado</div>` +
+        `</div>` +
+        `<div class="info-placeholder">No implementado</div>` +
+        sensorInfoStepperHtml(tab, true)
+      );
+    }
+
+    function escapeCssSelectorValue(value) {
+      const raw = String(value || '');
+      if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
+        return CSS.escape(raw);
+      }
+      return raw.replace(/["\\]/g, '\\$&');
+    }
+
+    function captureSensorInfoPanelUiState(tab) {
+      if (tab !== 'topics') return null;
+      const searchInput = document.getElementById('infoTopicsSearchInput');
+      const copyBtn = document.getElementById('infoTopicsCopyBtn');
+      const listEl = document.querySelector('#infoPanel .info-topics-list');
+      const streamEl = document.querySelector('#infoPanel .info-topics-stream');
+      const activeElement = document.activeElement;
+      const uiState = {
+        activeRole: '',
+        activeTopicName: '',
+        selectionStart: null,
+        selectionEnd: null,
+        listScrollTop: listEl ? listEl.scrollTop : 0,
+        streamScrollTop: streamEl ? streamEl.scrollTop : 0
+      };
+
+      if (searchInput && activeElement === searchInput) {
+        uiState.activeRole = 'search';
+        uiState.selectionStart = Number.isFinite(Number(searchInput.selectionStart))
+          ? Number(searchInput.selectionStart)
+          : null;
+        uiState.selectionEnd = Number.isFinite(Number(searchInput.selectionEnd))
+          ? Number(searchInput.selectionEnd)
+          : uiState.selectionStart;
+        return uiState;
+      }
+
+      if (copyBtn && activeElement === copyBtn) {
+        uiState.activeRole = 'copy';
+        return uiState;
+      }
+
+      if (activeElement && typeof activeElement.closest === 'function') {
+        const topicButton = activeElement.closest('[data-topic-name]');
+        if (topicButton) {
+          uiState.activeRole = 'topic';
+          uiState.activeTopicName = String(topicButton.dataset.topicName || '');
+        }
+      }
+
+      return uiState;
+    }
+
+    function restoreSensorInfoPanelUiState(tab, uiState) {
+      if (tab !== 'topics' || !uiState) return;
+
+      const listEl = document.querySelector('#infoPanel .info-topics-list');
+      if (listEl) {
+        listEl.scrollTop = Number(uiState.listScrollTop || 0);
+      }
+
+      const streamEl = document.querySelector('#infoPanel .info-topics-stream');
+      if (streamEl) {
+        streamEl.scrollTop = Number(uiState.streamScrollTop || 0);
+      }
+
+      if (uiState.activeRole === 'search') {
+        const searchInput = document.getElementById('infoTopicsSearchInput');
+        if (searchInput) {
+          searchInput.focus({ preventScroll: true });
+          if (uiState.selectionStart != null) {
+            const selectionEnd = uiState.selectionEnd != null
+              ? uiState.selectionEnd
+              : uiState.selectionStart;
+            try {
+              searchInput.setSelectionRange(uiState.selectionStart, selectionEnd);
+            } catch (error) {
+            }
+          }
+        }
+        return;
+      }
+
+      if (uiState.activeRole === 'copy') {
+        const copyBtn = document.getElementById('infoTopicsCopyBtn');
+        if (copyBtn) {
+          copyBtn.focus({ preventScroll: true });
+        }
+        return;
+      }
+
+      if (uiState.activeRole === 'topic' && uiState.activeTopicName) {
+        const button = document.querySelector(
+          `[data-topic-name="${escapeCssSelectorValue(uiState.activeTopicName)}"]`
+        );
+        if (button instanceof HTMLElement) {
+          button.focus({ preventScroll: true });
+        }
+      }
+    }
+
+    function renderSensorInfoPanel() {
+      const panel = document.getElementById('infoPanel');
+      if (!panel) return;
+      const tab = state.sensorInfo.activeTab;
+      const uiState = captureSensorInfoPanelUiState(tab);
+      const payload = state.sensorInfo.payloads[tab];
+      const error = state.sensorInfo.errors[tab];
+      const loading = state.sensorInfo.loading[tab] === true;
+      const implemented = state.sensorInfo.implemented[tab] === true;
+
+      let html = '';
+      if (!implemented) {
+        html = renderSensorInfoUnimplementedPanel(tab);
+      } else if (!state.connected) {
+        html =
+          `<div class="info-panel-header"><h4 class="info-panel-title">${escapeHtml(SENSOR_INFO_TAB_LABELS[tab] || tab)}</h4><div class="info-panel-status">Sin conexion</div></div>` +
+          `<div class="info-placeholder">Conecta el WebSocket para consultar informacion de sensores.</div>` +
+          sensorInfoStepperHtml(tab, false);
+      } else if (loading && !payload) {
+        html =
+          `<div class="info-panel-header"><h4 class="info-panel-title">${escapeHtml(SENSOR_INFO_TAB_LABELS[tab] || tab)}</h4><div class="info-panel-status">Cargando...</div></div>` +
+          `<div class="info-placeholder">Esperando datos del backend...</div>` +
+          sensorInfoStepperHtml(tab, false);
+      } else {
+        let body = '';
+        if (tab === 'general') {
+          body = renderSensorInfoGeneralPanel(payload || { interval_s: state.sensorInfo.intervals[tab], snapshot: {} });
+        } else if (tab === 'topics') {
+          body = renderSensorInfoTopicsPanel(payload || { interval_s: state.sensorInfo.intervals[tab], snapshot: {} });
+        } else if (tab === 'pixhawk_gps') {
+          body = renderSensorInfoPixhawkPanel(payload || { interval_s: state.sensorInfo.intervals[tab], snapshot: {} });
+        }
+        html = `${error ? `<div class="info-error">${escapeHtml(error)}</div>` : ''}${body}`;
+      }
+
+      panel.innerHTML = html;
+      const intervalInput = document.getElementById('infoRefreshIntervalInput');
+      if (intervalInput) {
+        intervalInput.addEventListener('input', handleSensorInfoIntervalChange);
+        intervalInput.addEventListener('change', handleSensorInfoIntervalChange);
+      }
+      const topicsSearchInput = document.getElementById('infoTopicsSearchInput');
+      if (topicsSearchInput) {
+        topicsSearchInput.addEventListener('input', handleSensorInfoTopicsSearchInput);
+      }
+      document.querySelectorAll('[data-topic-name]').forEach((button) => {
+        const handleTopicSelection = (event) => {
+          if (event && typeof event.preventDefault === 'function') {
+            event.preventDefault();
+          }
+          selectSensorInfoTopic(String(button.dataset.topicName || ''));
+        };
+        button.addEventListener('pointerdown', handleTopicSelection);
+        button.addEventListener('click', handleTopicSelection);
+        button.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            handleTopicSelection(event);
+          }
+        });
+      });
+      const copyBtn = document.getElementById('infoTopicsCopyBtn');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', copySensorInfoTopicsHistory);
+      }
+      restoreSensorInfoPanelUiState(tab, uiState);
+      renderSensorInfoTabsUi();
+    }
+
+    function syncSensorInfoView() {
+      if (!state.sensorInfo.open) return;
+      const tab = state.sensorInfo.activeTab;
+      if (!tab) return;
+      state.sensorInfo.loading[tab] = true;
+      state.sensorInfo.errors[tab] = '';
+      renderSensorInfoPanel();
+      if (!state.connected) return;
+      send(
+        {
+          op: 'set_sensor_info_view',
+          enabled: true,
+          tab,
+          interval_s: clampSensorInfoInterval(state.sensorInfo.intervals[tab]),
+          topic_name: tab === 'topics'
+            ? (String(state.sensorInfo.topics.selectedTopic || '').trim() || null)
+            : null
+        },
+        { track: false }
+      );
+    }
+
+    function disableSensorInfoView() {
+      Object.keys(state.sensorInfo.loading).forEach((tab) => {
+        state.sensorInfo.loading[tab] = false;
+      });
+      if (!state.connected) return;
+      send(
+        {
+          op: 'set_sensor_info_view',
+          enabled: false,
+          tab: null,
+          interval_s: clampSensorInfoInterval(state.sensorInfo.intervals[state.sensorInfo.activeTab] || 0.1)
+        },
+        { track: false }
+      );
+    }
+
+    function openInfoModal() {
+      const modal = document.getElementById('infoModal');
+      if (!modal) return;
+      state.sensorInfo.open = true;
+      modal.classList.add('show');
+      renderSensorInfoPanel();
+      syncSensorInfoView();
+    }
+
+    function closeInfoModal() {
+      const modal = document.getElementById('infoModal');
+      if (!modal) return;
+      state.sensorInfo.open = false;
+      modal.classList.remove('show');
+      disableSensorInfoView();
+    }
+
+    function setActiveSensorInfoTab(tab) {
+      if (!Object.prototype.hasOwnProperty.call(state.sensorInfo.intervals, tab)) return;
+      state.sensorInfo.activeTab = tab;
+      renderSensorInfoPanel();
+      if (state.sensorInfo.open) {
+        syncSensorInfoView();
+      }
+    }
+
+    function handleSensorInfoIntervalChange(event) {
+      const tab = state.sensorInfo.activeTab;
+      const nextValue = clampSensorInfoInterval(event.target && event.target.value);
+      state.sensorInfo.intervals[tab] = nextValue;
+      if (event.target) {
+        event.target.value = nextValue.toFixed(1);
+      }
+      if (state.sensorInfo.open) {
+        syncSensorInfoView();
+      }
+    }
+
+    function handleSensorInfoTopicsSearchInput(event) {
+      state.sensorInfo.topics.search = String(event.target && event.target.value || '');
+      renderSensorInfoPanel();
+    }
+
+    function selectSensorInfoTopic(topicName) {
+      const normalizedTopicName = String(topicName || '');
+      if (
+        normalizedTopicName
+        && normalizedTopicName === String(state.sensorInfo.topics.selectedTopic || '')
+        && normalizedTopicName === String(state.sensorInfo.topics.pendingTopic || '')
+      ) {
+        return;
+      }
+      state.sensorInfo.topics.pendingTopic = normalizedTopicName;
+      state.sensorInfo.topics.selectedTopic = normalizedTopicName;
+      state.sensorInfo.topics.selectedType = '';
+      state.sensorInfo.topics.history = [];
+      state.sensorInfo.topics.copiableText = '';
+      state.sensorInfo.topics.truncated = false;
+      state.sensorInfo.payloads.topics = null;
+      state.sensorInfo.errors.topics = '';
+      if (state.sensorInfo.open && state.sensorInfo.activeTab === 'topics') {
+        syncSensorInfoView();
+      } else {
+        renderSensorInfoPanel();
+      }
+    }
+
+    function copySensorInfoTopicsHistory() {
+      copyTextToClipboard(state.sensorInfo.topics.copiableText || '')
+        .then(() => {
+          setStatus('Topic history copied', true);
+        })
+        .catch((error) => {
+          setStatus(`Copy failed: ${error}`, false);
+        });
+    }
+
+    function updateSensorInfoPayload(msg) {
+      const tab = String(msg.tab || '');
+      if (!Object.prototype.hasOwnProperty.call(state.sensorInfo.payloads, tab)) return;
+      state.sensorInfo.loading[tab] = false;
+      state.sensorInfo.errors[tab] = msg.ok === false ? String(msg.error || 'sensor info error') : '';
+      state.sensorInfo.implemented[tab] = msg.implemented === true;
+      state.sensorInfo.payloads[tab] = msg;
+      if (tab === 'topics') {
+        const snapshot = msg.snapshot && typeof msg.snapshot === 'object' ? msg.snapshot : {};
+        const pendingTopic = String(state.sensorInfo.topics.pendingTopic || '');
+        const snapshotSelectedTopic = String(snapshot.selected_topic || '');
+        state.sensorInfo.topics.catalog = Array.isArray(snapshot.topics_catalog)
+          ? snapshot.topics_catalog.slice()
+          : [];
+        if (!pendingTopic || snapshotSelectedTopic === pendingTopic) {
+          state.sensorInfo.topics.selectedTopic = snapshotSelectedTopic;
+          state.sensorInfo.topics.selectedType = String(snapshot.selected_type || '');
+          if (pendingTopic && snapshotSelectedTopic === pendingTopic) {
+            state.sensorInfo.topics.pendingTopic = '';
+          }
+        } else if (snapshot.error) {
+          state.sensorInfo.topics.pendingTopic = '';
+          state.sensorInfo.topics.selectedType = String(snapshot.selected_type || '');
+        }
+        state.sensorInfo.topics.history = Array.isArray(snapshot.history_entries)
+          ? snapshot.history_entries.slice()
+          : [];
+        state.sensorInfo.topics.copiableText = String(snapshot.history_text || '');
+        state.sensorInfo.topics.truncated = snapshot.truncated === true;
+        if (msg.ok !== false && snapshot.error) {
+          state.sensorInfo.errors[tab] = String(snapshot.error);
+        }
+      }
+      if (Number.isFinite(Number(msg.interval_s))) {
+        state.sensorInfo.intervals[tab] = clampSensorInfoInterval(msg.interval_s);
+      }
+      if (state.sensorInfo.open && state.sensorInfo.activeTab === tab) {
+        renderSensorInfoPanel();
+      }
+    }
+
     function updateNavTelemetry(payload) {
       if (payload && Array.isArray(payload.alerts)) {
         setAlerts(payload.alerts);
@@ -3585,6 +4614,9 @@
         } else {
           updateCameraStatusUi({ ok: false, error: CAMERA_DISABLED_SIM_ERROR, last_command: 'none', zoom_in: false });
         }
+        if (state.sensorInfo.open) {
+          syncSensorInfoView();
+        }
       };
 
       state.ws.onclose = () => {
@@ -3615,6 +4647,9 @@
           showConnectionFailedDialog();
         }
         state.connectErrorDialogShown = false;
+        if (state.sensorInfo.open) {
+          renderSensorInfoPanel();
+        }
       };
 
       state.ws.onerror = () => {
@@ -3764,6 +4799,11 @@
         return;
       }
 
+      if (msg.op === 'sensor_info') {
+        updateSensorInfoPayload(msg);
+        return;
+      }
+
       if (msg.op === 'ack') {
         const requestName = String(msg.request || '');
         const hasReqId = msg.client_req_id != null;
@@ -3883,6 +4923,30 @@
             setStatus('Rosbag recording stopped', true);
           } else {
             setStatus(`Rosbag stop failed: ${msg.error || 'error'}`, false);
+          }
+        } else if (msg.request === 'set_sensor_info_view') {
+          const tab = String(msg.tab || state.sensorInfo.activeTab || '');
+          if (Object.prototype.hasOwnProperty.call(state.sensorInfo.loading, tab)) {
+            state.sensorInfo.loading[tab] = msg.ok === true && msg.enabled === true && msg.implemented === true;
+            if (msg.enabled === true || msg.tab) {
+              state.sensorInfo.implemented[tab] = msg.implemented === true;
+            }
+            if (Number.isFinite(Number(msg.interval_s))) {
+              state.sensorInfo.intervals[tab] = clampSensorInfoInterval(msg.interval_s);
+            }
+            state.sensorInfo.errors[tab] = msg.ok ? '' : String(msg.error || 'sensor info error');
+            if (tab === 'topics') {
+              if (!msg.ok) {
+                state.sensorInfo.topics.pendingTopic = '';
+              } else if (msg.topic_name) {
+                state.sensorInfo.topics.pendingTopic = '';
+              }
+              state.sensorInfo.topics.selectedTopic = String(msg.topic_name || state.sensorInfo.topics.selectedTopic || '');
+              state.sensorInfo.topics.selectedType = String(msg.selected_type || state.sensorInfo.topics.selectedType || '');
+            }
+          }
+          if (state.sensorInfo.open) {
+            renderSensorInfoPanel();
           }
         } else {
           if (msg.ok) {
@@ -4465,8 +5529,19 @@
         renderRosbagUi();
       }
     });
+    document.getElementById('infoBtn').addEventListener('click', () => {
+      openInfoModal();
+    });
     document.getElementById('menuCloseBtn').addEventListener('click', () => {
       closeMenuModal();
+    });
+    document.getElementById('infoCloseBtn').addEventListener('click', () => {
+      closeInfoModal();
+    });
+    document.querySelectorAll('[data-info-tab]').forEach((button) => {
+      button.addEventListener('click', () => {
+        setActiveSensorInfoTab(String(button.dataset.infoTab || 'general'));
+      });
     });
     document.getElementById('startRosbagBtn').addEventListener('click', () => {
       const profile = String(document.getElementById('rosbagProfile')?.value || 'core');
@@ -4568,6 +5643,7 @@
       const isEscape = code === 'Escape' || key === 'Escape';
       const snapshotModal = document.getElementById('snapshotModal');
       const menuModal = document.getElementById('menuModal');
+      const infoModal = document.getElementById('infoModal');
       if (isEscape && snapshotModal && snapshotModal.classList.contains('show')) {
         event.preventDefault();
         if (event.shiftKey) {
@@ -4579,6 +5655,11 @@
       if (isEscape && menuModal && menuModal.classList.contains('show')) {
         event.preventDefault();
         closeMenuModal();
+        return;
+      }
+      if (isEscape && infoModal && infoModal.classList.contains('show')) {
+        event.preventDefault();
+        closeInfoModal();
         return;
       }
 
@@ -4737,6 +5818,11 @@
         closeMenuModal();
       }
     });
+    document.getElementById('infoModal').addEventListener('click', (e) => {
+      if (e.target && e.target.id === 'infoModal') {
+        closeInfoModal();
+      }
+    });
 
     const mapContainer = map.getContainer();
     mapContainer.addEventListener('pointerdown', beginGoalCreateSession, { passive: false });
@@ -4793,6 +5879,7 @@
     renderGoalWaypoints();
     updateMapToolsToolbarUi();
     renderActiveMapTool();
+    renderSensorInfoPanel();
   </script>
 </body>
 </html>

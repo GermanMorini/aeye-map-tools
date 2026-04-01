@@ -1,6 +1,7 @@
 import asyncio
 import base64
 from collections import deque
+import contextlib
 import json
 import math
 import os
@@ -17,13 +18,25 @@ import numpy as np
 import rclpy
 import websockets
 from ament_index_python.packages import get_package_share_directory
+from geometry_msgs.msg import TwistStamped
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from nav_msgs.msg import Odometry
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import NavSatFix
+from rclpy.serialization import deserialize_message
+from sensor_msgs.msg import Imu, NavSatFix
+from std_msgs.msg import Float32, Int32, String
 from std_srvs.srv import Trigger
+import yaml
+
+from rosidl_runtime_py.convert import message_to_ordereddict
+from rosidl_runtime_py.utilities import get_message
+
+try:
+    from mavros_msgs.msg import GPSRAW
+except ImportError:
+    GPSRAW = None
 
 from interfaces.msg import CmdVelFinal, NavEvent, NavTelemetry
 from interfaces.srv import (
@@ -31,6 +44,7 @@ from interfaces.srv import (
     CameraPan,
     CameraStatus,
     CancelNavGoal,
+    GetDatum,
     GetNavSnapshot,
     GetNavState,
     GetZonesState,
@@ -89,6 +103,709 @@ ROSBAG_TOPIC_PROFILES: Dict[str, Tuple[str, ...]] = {
 }
 
 UNSET = object()
+SENSOR_INFO_TABS = ("general", "topics", "pixhawk_gps", "lidar", "camera")
+FIX_TYPE_NAMES: Dict[int, str] = {
+    0: "NO_GPS",
+    1: "NO_FIX",
+    2: "2D_FIX",
+    3: "3D_FIX",
+    4: "DGPS",
+    5: "RTK_FLOAT",
+    6: "RTK_FIXED",
+}
+FIX_PRECISION_M: Dict[int, float] = {
+    3: 3.0,
+    4: 0.5,
+    5: 0.3,
+    6: 0.02,
+}
+TOPICS_HISTORY_MAX_MESSAGES = 200
+TOPICS_HISTORY_MAX_TEXT_BYTES = 512 * 1024
+TOPICS_MAX_ARRAY_ITEMS = 100
+TOPICS_MAX_BYTES_PREVIEW = 256
+
+
+def _stamp_to_dict(stamp: Any) -> Dict[str, int]:
+    return {
+        "sec": int(getattr(stamp, "sec", 0)),
+        "nanosec": int(getattr(stamp, "nanosec", 0)),
+    }
+
+
+def _stamp_to_epoch_ms(stamp: Any) -> Optional[int]:
+    sec = getattr(stamp, "sec", None)
+    if sec is None:
+        return None
+    try:
+        sec_i = int(sec)
+        nanosec_i = int(getattr(stamp, "nanosec", 0))
+    except (TypeError, ValueError):
+        return None
+    return (sec_i * 1000) + int(nanosec_i / 1_000_000)
+
+
+def _normalize_angle_rad(angle_rad: float) -> float:
+    return math.atan2(math.sin(angle_rad), math.cos(angle_rad))
+
+
+def _yaw_enu_from_quaternion(
+    qx: float, qy: float, qz: float, qw: float
+) -> tuple[float | None, float | None]:
+    values = (qx, qy, qz, qw)
+    if not all(math.isfinite(v) for v in values):
+        return None, None
+
+    yaw = math.atan2(
+        2.0 * (qw * qz + qx * qy),
+        1.0 - 2.0 * (qy * qy + qz * qz),
+    )
+    yaw = _normalize_angle_rad(yaw)
+    yaw_deg = math.degrees(yaw)
+    return yaw, yaw_deg
+
+
+def _fix_quality_class(fix_type_name: str) -> str:
+    normalized = str(fix_type_name or "UNKNOWN").strip().upper()
+    if normalized == "RTK_FIXED":
+        return "good"
+    if normalized in {"RTK_FLOAT", "DGPS"}:
+        return "warn"
+    return "bad"
+
+
+def _estimated_precision_for_fix(fix_type: Any) -> Optional[float]:
+    try:
+        numeric = int(fix_type)
+    except (TypeError, ValueError):
+        return None
+    return FIX_PRECISION_M.get(numeric)
+
+
+def _resolve_fix_type_name(fix_type: Any, explicit_name: Any = None) -> str:
+    if explicit_name not in (None, ""):
+        return str(explicit_name)
+    try:
+        numeric = int(fix_type)
+    except (TypeError, ValueError):
+        return "UNKNOWN"
+    return FIX_TYPE_NAMES.get(numeric, "UNKNOWN")
+
+
+def _finite_or_none(value: Any) -> Optional[float]:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _json_clone_or_empty(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return json.loads(json.dumps(value))
+    return {}
+
+
+def _truncate_topic_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _truncate_topic_value(item) for key, item in value.items()}
+
+    if isinstance(value, (list, tuple)):
+        items = [_truncate_topic_value(item) for item in list(value)[:TOPICS_MAX_ARRAY_ITEMS]]
+        if len(value) > TOPICS_MAX_ARRAY_ITEMS:
+            items.append(
+                f"... truncated {len(value) - TOPICS_MAX_ARRAY_ITEMS} additional items ..."
+            )
+        return items
+
+    if isinstance(value, (bytes, bytearray)):
+        preview = bytes(value[:TOPICS_MAX_BYTES_PREVIEW]).hex()
+        if len(value) > TOPICS_MAX_BYTES_PREVIEW:
+            return (
+                f"<bytes len={len(value)} preview_hex={preview} "
+                f"truncated={len(value) - TOPICS_MAX_BYTES_PREVIEW}>"
+            )
+        return f"<bytes len={len(value)} hex={preview}>"
+
+    return value
+
+
+def _topic_message_to_text(msg: Any) -> str:
+    payload = message_to_ordereddict(msg)
+    truncated = _truncate_topic_value(payload)
+    return yaml.safe_dump(
+        truncated,
+        allow_unicode=False,
+        sort_keys=False,
+        default_flow_style=False,
+    ).strip()
+
+
+class SensorInfoSession:
+    @staticmethod
+    def normalize_tab(tab: Any) -> Optional[str]:
+        if tab is None:
+            return None
+        normalized = str(tab).strip().lower()
+        if normalized in SENSOR_INFO_TABS:
+            return normalized
+        return None
+
+    @staticmethod
+    def is_implemented_tab(tab: Optional[str]) -> bool:
+        return tab in {"general", "topics", "pixhawk_gps"}
+
+    def __init__(self, node: "WebZoneServerNode", ws: Any):
+        self.node = node
+        self.ws = ws
+        self._lock = threading.Lock()
+        self._enabled = False
+        self._active_tab: Optional[str] = None
+        self._interval_s = 0.1
+        self._subscriptions: List[Any] = []
+        self._data: Dict[str, Any] = {}
+        self._topic_name: Optional[str] = None
+        self._topic_type: Optional[str] = None
+        self._topic_message_type: Any = None
+        self._topic_history: deque[Dict[str, Any]] = deque()
+        self._topic_history_text_bytes = 0
+        self._topic_history_text = ""
+        self._topic_truncated = False
+        self._topic_error = ""
+        self._sender_task: Optional[asyncio.Task[Any]] = None
+
+    def configure(
+        self,
+        *,
+        enabled: bool,
+        tab: Optional[str],
+        interval_s: float,
+        topic_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        normalized_tab = self.normalize_tab(tab)
+        clamped_interval = min(5.0, max(0.1, float(interval_s)))
+        implemented = self.is_implemented_tab(normalized_tab)
+        normalized_topic_name = str(topic_name or "").strip() or None
+
+        with self._lock:
+            self._enabled = bool(enabled)
+            self._active_tab = normalized_tab if enabled else None
+            self._interval_s = clamped_interval
+            self._destroy_subscriptions_locked()
+            self._data = {}
+            self._reset_topics_locked()
+            self._cancel_sender_locked()
+
+            if not enabled or normalized_tab is None:
+                return {
+                    "enabled": False,
+                    "tab": None,
+                    "implemented": False,
+                    "interval_s": clamped_interval,
+                }
+
+            if implemented:
+                self._create_subscriptions_locked(normalized_tab, normalized_topic_name)
+
+            loop = asyncio.get_running_loop()
+            self._sender_task = loop.create_task(
+                self._sender_loop(normalized_tab, clamped_interval, implemented)
+            )
+
+        payload = {
+            "enabled": True,
+            "tab": normalized_tab,
+            "implemented": implemented,
+            "interval_s": clamped_interval,
+        }
+        if normalized_tab == "topics":
+            payload["topic_name"] = normalized_topic_name
+            payload["selected_type"] = self._topic_type
+        return payload
+
+    def close(self) -> None:
+        with self._lock:
+            self._enabled = False
+            self._active_tab = None
+            self._data = {}
+            self._reset_topics_locked()
+            self._destroy_subscriptions_locked()
+            self._cancel_sender_locked()
+
+    def subscription_count(self) -> int:
+        with self._lock:
+            return len(self._subscriptions)
+
+    def _cancel_sender_locked(self) -> None:
+        if self._sender_task is None:
+            return
+        self.node._loop.call_soon_threadsafe(self._sender_task.cancel)
+        self._sender_task = None
+
+    def _destroy_subscriptions_locked(self) -> None:
+        for subscription in self._subscriptions:
+            try:
+                self.node.destroy_subscription(subscription)
+            except Exception:
+                continue
+        self._subscriptions = []
+        self._topic_message_type = None
+
+    def _create_subscription_locked(
+        self, msg_type: Any, topic: str, callback: Any, qos: Any, *, raw: bool = False
+    ) -> None:
+        if msg_type is None:
+            return
+        subscription = self.node.create_subscription(
+            msg_type, topic, callback, qos, raw=raw
+        )
+        self._subscriptions.append(subscription)
+
+    def _create_subscriptions_locked(self, tab: str, topic_name: Optional[str]) -> None:
+        if tab == "topics":
+            if topic_name:
+                self._configure_topics_subscription_locked(topic_name)
+            return
+
+        self._create_subscription_locked(
+            NavSatFix, self.node.info_gps_topic, self._on_gps, qos_profile_sensor_data
+        )
+        self._create_subscription_locked(
+            Int32, self.node.info_fix_type_topic, self._on_fix_type, 10
+        )
+        self._create_subscription_locked(
+            String, self.node.info_rtk_status_topic, self._on_rtk_status, 10
+        )
+        self._create_subscription_locked(
+            Float32, self.node.info_rtcm_age_topic, self._on_rtcm_age, 10
+        )
+        self._create_subscription_locked(
+            Int32, self.node.info_rtcm_count_topic, self._on_rtcm_count, 10
+        )
+        self._create_subscription_locked(
+            String, self.node.info_rtk_source_status_topic, self._on_rtk_source_status, 10
+        )
+        if GPSRAW is not None:
+            self._create_subscription_locked(
+                GPSRAW, self.node.info_gps_raw_topic, self._on_gps_raw, qos_profile_sensor_data
+            )
+
+        if tab != "pixhawk_gps":
+            return
+
+        self._create_subscription_locked(
+            Imu, self.node.info_imu_topic, self._on_imu, qos_profile_sensor_data
+        )
+        self._create_subscription_locked(
+            TwistStamped, self.node.info_velocity_topic, self._on_velocity, qos_profile_sensor_data
+        )
+        self._create_subscription_locked(
+            Odometry, self.node.info_odom_topic, self._on_odom, qos_profile_sensor_data
+        )
+
+    def _reset_topics_locked(self) -> None:
+        self._topic_name = None
+        self._topic_type = None
+        self._topic_message_type = None
+        self._topic_history = deque()
+        self._topic_history_text_bytes = 0
+        self._topic_history_text = ""
+        self._topic_truncated = False
+        self._topic_error = ""
+
+    def _configure_topics_subscription_locked(self, topic_name: str) -> None:
+        self._topic_name = str(topic_name)
+        self._topic_type = None
+        self._topic_message_type = None
+        self._topic_history = deque()
+        self._topic_history_text_bytes = 0
+        self._topic_history_text = ""
+        self._topic_truncated = False
+        self._topic_error = ""
+
+        catalog = self.node.get_topics_catalog()
+        match = next((item for item in catalog if item.get("name") == self._topic_name), None)
+        if match is None:
+            self._topic_error = "topic not found in graph"
+            return
+
+        types = match.get("types") or []
+        if len(types) == 0:
+            self._topic_error = "topic has no announced types"
+            return
+        if len(types) > 1:
+            self._topic_error = "topic has multiple types; selection is ambiguous"
+            return
+
+        topic_type = str(types[0])
+        try:
+            message_type = get_message(topic_type)
+        except Exception as exc:
+            self._topic_error = f"failed to resolve topic type: {exc}"
+            return
+
+        self._topic_type = topic_type
+        self._topic_message_type = message_type
+        self._create_subscription_locked(
+            message_type,
+            self._topic_name,
+            self._on_topic_raw,
+            qos_profile_sensor_data,
+            raw=True,
+        )
+
+    def _on_topic_raw(self, raw_msg: bytes) -> None:
+        with self._lock:
+            message_type = self._topic_message_type
+            topic_name = self._topic_name
+        if message_type is None or topic_name is None:
+            return
+
+        try:
+            message = deserialize_message(raw_msg, message_type)
+            text = _topic_message_to_text(message)
+        except Exception as exc:
+            with self._lock:
+                self._topic_error = f"failed to decode topic message: {exc}"
+            return
+
+        received_at_epoch_ms = int(time.time() * 1000.0)
+        block = (
+            f"# topic: {topic_name}\n"
+            f"# received_at: {datetime.fromtimestamp(received_at_epoch_ms / 1000.0).isoformat()}\n"
+            f"{text}"
+        )
+        size_bytes = len(block.encode("utf-8", errors="replace"))
+        with self._lock:
+            self._topic_history.appendleft(
+                {"received_at_epoch_ms": received_at_epoch_ms, "text": block}
+            )
+            self._topic_history_text_bytes += size_bytes
+            while (
+                len(self._topic_history) > TOPICS_HISTORY_MAX_MESSAGES
+                or self._topic_history_text_bytes > TOPICS_HISTORY_MAX_TEXT_BYTES
+            ):
+                removed = self._topic_history.pop()
+                self._topic_history_text_bytes -= len(
+                    str(removed.get("text", "")).encode("utf-8", errors="replace")
+                )
+                self._topic_truncated = True
+            self._topic_history_text = "\n\n---\n\n".join(
+                str(item.get("text", "")) for item in self._topic_history
+            )
+
+    async def _sender_loop(self, tab: str, interval_s: float, implemented: bool) -> None:
+        try:
+            if not implemented:
+                await self.node.send_ws_json(
+                    self.ws,
+                    {
+                        "op": "sensor_info",
+                        "tab": tab,
+                        "ok": True,
+                        "implemented": False,
+                        "snapshot": {},
+                        "interval_s": interval_s,
+                    },
+                )
+                return
+
+            while True:
+                payload = await self._build_payload(tab, interval_s)
+                await self.node.send_ws_json(self.ws, payload)
+                await asyncio.sleep(interval_s)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await self.node.send_ws_json(
+                    self.ws,
+                    {
+                        "op": "sensor_info",
+                        "tab": tab,
+                        "ok": False,
+                        "implemented": implemented,
+                        "error": str(exc),
+                        "snapshot": {},
+                        "interval_s": interval_s,
+                    },
+                )
+
+    async def _build_payload(self, tab: str, interval_s: float) -> Dict[str, Any]:
+        if tab == "general":
+            snapshot = await asyncio.to_thread(self._build_general_snapshot)
+        elif tab == "topics":
+            snapshot = await asyncio.to_thread(self._build_topics_snapshot)
+        elif tab == "pixhawk_gps":
+            snapshot = await asyncio.to_thread(self._build_pixhawk_gps_snapshot)
+        else:
+            snapshot = {}
+        return {
+            "op": "sensor_info",
+            "tab": tab,
+            "ok": True,
+            "implemented": True,
+            "snapshot": snapshot,
+            "interval_s": interval_s,
+        }
+
+    def _build_topics_snapshot(self) -> Dict[str, Any]:
+        catalog = self.node.get_topics_catalog()
+        with self._lock:
+            selected_topic = self._topic_name
+            selected_type = self._topic_type
+            history_entries = list(self._topic_history)
+            history_text = str(self._topic_history_text)
+            truncated = bool(self._topic_truncated)
+            error = str(self._topic_error)
+
+        if selected_topic:
+            match = next((item for item in catalog if item.get("name") == selected_topic), None)
+            if match is None:
+                with self._lock:
+                    self._topic_error = "topic disappeared from graph"
+                    error = self._topic_error
+                    self._destroy_subscriptions_locked()
+            else:
+                types = match.get("types") or []
+                if len(types) == 1:
+                    next_type = str(types[0])
+                    if selected_type is not None and next_type != selected_type:
+                        with self._lock:
+                            self._topic_error = "topic type changed while subscribed"
+                            error = self._topic_error
+                            self._destroy_subscriptions_locked()
+                    selected_type = next_type
+                else:
+                    with self._lock:
+                        self._topic_error = (
+                            "topic has multiple types; selection is ambiguous"
+                            if len(types) > 1
+                            else "topic has no announced types"
+                        )
+                        error = self._topic_error
+                        self._destroy_subscriptions_locked()
+
+        return {
+            "topics_catalog": catalog,
+            "selected_topic": selected_topic,
+            "selected_type": selected_type,
+            "history_entries": history_entries,
+            "history_text": history_text,
+            "truncated": truncated,
+            "error": error,
+        }
+
+    def _build_general_snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            gps = _json_clone_or_empty(self._data.get("gps"))
+            gps_meta = _json_clone_or_empty(self._data.get("gps_meta"))
+            rtk_source_state = _json_clone_or_empty(self._data.get("rtk_source_state"))
+
+        datum = self.node.get_datum_info()
+        fix_type = gps_meta.get("fix_type")
+        fix_type_name = _resolve_fix_type_name(fix_type, gps_meta.get("fix_type_name"))
+        precision_m = _estimated_precision_for_fix(fix_type)
+        return {
+            "datum": datum,
+            "gps": gps,
+            "gps_meta": {
+                **gps_meta,
+                "fix_type_name": fix_type_name,
+                "fix_quality_class": _fix_quality_class(fix_type_name),
+                "estimated_precision_m": precision_m,
+            },
+            "rtk_source_state": rtk_source_state,
+        }
+
+    def _build_pixhawk_gps_snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            imu = _json_clone_or_empty(self._data.get("imu"))
+            gps = _json_clone_or_empty(self._data.get("gps"))
+            gps_meta = _json_clone_or_empty(self._data.get("gps_meta"))
+            velocity = _json_clone_or_empty(self._data.get("velocity"))
+            odom = _json_clone_or_empty(self._data.get("odom"))
+            rtk_source_state = _json_clone_or_empty(self._data.get("rtk_source_state"))
+
+        diagnostics: Dict[str, Any] = {"yaw_delta_deg": None}
+        imu_yaw_rad = _finite_or_none(imu.get("yaw_enu_rad"))
+        odom_yaw_rad = _finite_or_none(odom.get("yaw_enu_rad"))
+        if imu_yaw_rad is not None and odom_yaw_rad is not None:
+            diagnostics["yaw_delta_deg"] = math.degrees(
+                _normalize_angle_rad(imu_yaw_rad - odom_yaw_rad)
+            )
+
+        gps_meta["fix_type_name"] = _resolve_fix_type_name(
+            gps_meta.get("fix_type"),
+            gps_meta.get("fix_type_name"),
+        )
+        gps_meta["fix_quality_class"] = _fix_quality_class(gps_meta["fix_type_name"])
+        gps_meta["estimated_precision_m"] = _estimated_precision_for_fix(
+            gps_meta.get("fix_type")
+        )
+
+        return {
+            "imu": imu,
+            "gps": gps,
+            "gps_meta": gps_meta,
+            "velocity": velocity,
+            "odom": odom,
+            "diagnostics": diagnostics,
+            "topics": {
+                "imu": self.node.info_imu_topic,
+                "gps": self.node.info_gps_topic,
+                "velocity": self.node.info_velocity_topic,
+                "odom": self.node.info_odom_topic,
+                "fix_type": self.node.info_fix_type_topic,
+                "rtk_status": self.node.info_rtk_status_topic,
+                "rtcm_age": self.node.info_rtcm_age_topic,
+                "rtcm_count": self.node.info_rtcm_count_topic,
+                "gps_raw": self.node.info_gps_raw_topic,
+                "rtk_source_status": self.node.info_rtk_source_status_topic,
+            },
+            "rtk_source_state": rtk_source_state,
+        }
+
+    def _on_gps(self, msg: NavSatFix) -> None:
+        with self._lock:
+            self._data["gps"] = {
+                "stamp": _stamp_to_dict(msg.header.stamp),
+                "frame_id": str(msg.header.frame_id),
+                "status": int(msg.status.status),
+                "service": int(msg.status.service),
+                "latitude": float(msg.latitude),
+                "longitude": float(msg.longitude),
+                "altitude": float(msg.altitude),
+                "position_covariance": list(msg.position_covariance),
+                "position_covariance_type": int(msg.position_covariance_type),
+            }
+
+    def _on_fix_type(self, msg: Int32) -> None:
+        fix_type = int(msg.data)
+        with self._lock:
+            gps_meta = self._data.setdefault("gps_meta", {})
+            gps_meta["fix_type"] = fix_type
+            gps_meta["fix_type_name"] = FIX_TYPE_NAMES.get(fix_type, "UNKNOWN")
+
+    def _on_rtk_status(self, msg: String) -> None:
+        with self._lock:
+            gps_meta = self._data.setdefault("gps_meta", {})
+            gps_meta["rtk_status"] = str(msg.data)
+
+    def _on_rtcm_age(self, msg: Float32) -> None:
+        with self._lock:
+            gps_meta = self._data.setdefault("gps_meta", {})
+            gps_meta["rtcm_age_s"] = float(msg.data)
+
+    def _on_rtcm_count(self, msg: Int32) -> None:
+        with self._lock:
+            gps_meta = self._data.setdefault("gps_meta", {})
+            gps_meta["rtcm_received_count"] = int(msg.data)
+
+    def _on_gps_raw(self, msg: Any) -> None:
+        with self._lock:
+            gps_meta = self._data.setdefault("gps_meta", {})
+            gps_meta["fix_type"] = int(msg.fix_type)
+            gps_meta["fix_type_name"] = FIX_TYPE_NAMES.get(int(msg.fix_type), "UNKNOWN")
+            gps_meta["satellites_visible"] = int(msg.satellites_visible)
+            gps_meta["eph"] = int(msg.eph)
+            gps_meta["epv"] = int(msg.epv)
+
+    def _on_rtk_source_status(self, msg: String) -> None:
+        try:
+            payload = json.loads(str(msg.data))
+        except Exception:
+            return
+        if not isinstance(payload, dict):
+            return
+        with self._lock:
+            self._data["rtk_source_state"] = payload
+
+    def _on_imu(self, msg: Imu) -> None:
+        yaw_enu_rad, yaw_enu_deg = _yaw_enu_from_quaternion(
+            msg.orientation.x,
+            msg.orientation.y,
+            msg.orientation.z,
+            msg.orientation.w,
+        )
+        with self._lock:
+            self._data["imu"] = {
+                "stamp": _stamp_to_dict(msg.header.stamp),
+                "frame_id": str(msg.header.frame_id),
+                "orientation": {
+                    "x": float(msg.orientation.x),
+                    "y": float(msg.orientation.y),
+                    "z": float(msg.orientation.z),
+                    "w": float(msg.orientation.w),
+                },
+                "yaw_enu_rad": yaw_enu_rad,
+                "yaw_enu_deg": yaw_enu_deg,
+                "angular_velocity": {
+                    "x": float(msg.angular_velocity.x),
+                    "y": float(msg.angular_velocity.y),
+                    "z": float(msg.angular_velocity.z),
+                },
+                "linear_acceleration": {
+                    "x": float(msg.linear_acceleration.x),
+                    "y": float(msg.linear_acceleration.y),
+                    "z": float(msg.linear_acceleration.z),
+                },
+            }
+
+    def _on_velocity(self, msg: TwistStamped) -> None:
+        with self._lock:
+            self._data["velocity"] = {
+                "stamp": _stamp_to_dict(msg.header.stamp),
+                "frame_id": str(msg.header.frame_id),
+                "linear": {
+                    "x": float(msg.twist.linear.x),
+                    "y": float(msg.twist.linear.y),
+                    "z": float(msg.twist.linear.z),
+                },
+                "angular": {
+                    "x": float(msg.twist.angular.x),
+                    "y": float(msg.twist.angular.y),
+                    "z": float(msg.twist.angular.z),
+                },
+            }
+
+    def _on_odom(self, msg: Odometry) -> None:
+        yaw_enu_rad, yaw_enu_deg = _yaw_enu_from_quaternion(
+            msg.pose.pose.orientation.x,
+            msg.pose.pose.orientation.y,
+            msg.pose.pose.orientation.z,
+            msg.pose.pose.orientation.w,
+        )
+        with self._lock:
+            self._data["odom"] = {
+                "stamp": _stamp_to_dict(msg.header.stamp),
+                "frame_id": str(msg.header.frame_id),
+                "child_frame_id": str(msg.child_frame_id),
+                "position": {
+                    "x": float(msg.pose.pose.position.x),
+                    "y": float(msg.pose.pose.position.y),
+                    "z": float(msg.pose.pose.position.z),
+                },
+                "orientation": {
+                    "x": float(msg.pose.pose.orientation.x),
+                    "y": float(msg.pose.pose.orientation.y),
+                    "z": float(msg.pose.pose.orientation.z),
+                    "w": float(msg.pose.pose.orientation.w),
+                },
+                "yaw_enu_rad": yaw_enu_rad,
+                "yaw_enu_deg": yaw_enu_deg,
+                "linear": {
+                    "x": float(msg.twist.twist.linear.x),
+                    "y": float(msg.twist.twist.linear.y),
+                    "z": float(msg.twist.twist.linear.z),
+                },
+                "angular": {
+                    "x": float(msg.twist.twist.angular.x),
+                    "y": float(msg.twist.twist.angular.y),
+                    "z": float(msg.twist.twist.angular.z),
+                },
+            }
 
 
 class WebZoneServerNode(Node):
@@ -134,6 +851,15 @@ class WebZoneServerNode(Node):
         self.declare_parameter("camera_pan_service", "/camara/camera_pan")
         self.declare_parameter("camera_zoom_toggle_service", "/camara/camera_zoom_toggle")
         self.declare_parameter("camera_status_service", "/camara/camera_status")
+        self.declare_parameter("imu_topic", "/imu/data")
+        self.declare_parameter("velocity_topic", "/velocity")
+        self.declare_parameter("fix_type_topic", "/gps/fix_type")
+        self.declare_parameter("rtk_status_topic", "/gps/rtk_status")
+        self.declare_parameter("rtcm_age_topic", "/gps/rtcm_age_s")
+        self.declare_parameter("rtcm_count_topic", "/gps/rtcm_received_count")
+        self.declare_parameter("gps_raw_topic", "/mavros_node/gps1/raw")
+        self.declare_parameter("rtk_source_status_topic", "/gps/rtk_source/status_json")
+        self.declare_parameter("nav_get_datum_service", "/datum_setter/get_datum")
 
         self.ws_host = str(self.get_parameter("ws_host").value)
         self.ws_port = int(self.get_parameter("ws_port").value)
@@ -184,10 +910,24 @@ class WebZoneServerNode(Node):
             self.get_parameter("camera_zoom_toggle_service").value
         )
         self.camera_status_service = str(self.get_parameter("camera_status_service").value)
+        self.info_gps_topic = str(self.get_parameter("gps_topic").value)
+        self.info_odom_topic = str(self.get_parameter("odom_topic").value)
+        self.info_imu_topic = str(self.get_parameter("imu_topic").value)
+        self.info_velocity_topic = str(self.get_parameter("velocity_topic").value)
+        self.info_fix_type_topic = str(self.get_parameter("fix_type_topic").value)
+        self.info_rtk_status_topic = str(self.get_parameter("rtk_status_topic").value)
+        self.info_rtcm_age_topic = str(self.get_parameter("rtcm_age_topic").value)
+        self.info_rtcm_count_topic = str(self.get_parameter("rtcm_count_topic").value)
+        self.info_gps_raw_topic = str(self.get_parameter("gps_raw_topic").value)
+        self.info_rtk_source_status_topic = str(
+            self.get_parameter("rtk_source_status_topic").value
+        )
+        self.nav_get_datum_service = str(self.get_parameter("nav_get_datum_service").value)
 
         self._lock = threading.Lock()
         self._ws_clients: Set[Any] = set()
         self._ws_send_locks: Dict[Any, asyncio.Lock] = {}
+        self._sensor_info_sessions: Dict[Any, SensorInfoSession] = {}
 
         self._last_robot_pose: Optional[Dict[str, float]] = None
         self._last_robot_heading_deg: Optional[float] = None
@@ -265,6 +1005,9 @@ class WebZoneServerNode(Node):
         self._nav_set_datum_client = self.create_client(
             SetDatum, self.nav_set_datum_service
         )
+        self._nav_get_datum_client = self.create_client(
+            GetDatum, self.nav_get_datum_service
+        )
         self._teleop_cmd_pub = self.create_publisher(CmdVelFinal, self.teleop_cmd_topic, 10)
         self._nav_get_state_client = self.create_client(GetNavState, self.nav_get_state_service)
         self._nav_snapshot_client = self.create_client(GetNavSnapshot, self.nav_snapshot_service)
@@ -284,6 +1027,7 @@ class WebZoneServerNode(Node):
             f"rosbag_dir={self.rosbag_output_dir}, "
             f"camera_pan={self.camera_pan_service}, camera_zoom_toggle={self.camera_zoom_toggle_service}, "
             f"camera_status={self.camera_status_service}, "
+            f"get_datum={self.nav_get_datum_service}, "
             f"teleop_topic={self.teleop_cmd_topic}, gps_topic={self.gps_topic}, "
             f"odom_topic={self.odom_topic})"
         )
@@ -293,14 +1037,18 @@ class WebZoneServerNode(Node):
         with self._lock:
             self._ws_clients.add(ws)
             self._ws_send_locks[ws] = asyncio.Lock()
+            self._sensor_info_sessions[ws] = SensorInfoSession(self, ws)
             count = len(self._ws_clients)
         self.get_logger().info(f"WS client connected (clients={count})")
 
     def remove_client(self, ws: Any) -> None:
         with self._lock:
+            sensor_info_session = self._sensor_info_sessions.pop(ws, None)
             self._ws_clients.discard(ws)
             self._ws_send_locks.pop(ws, None)
             count = len(self._ws_clients)
+        if sensor_info_session is not None:
+            sensor_info_session.close()
         self.get_logger().info(f"WS client disconnected (clients={count})")
 
     async def send_ws_text(self, ws: Any, text: str) -> bool:
@@ -314,6 +1062,108 @@ class WebZoneServerNode(Node):
 
     async def send_ws_json(self, ws: Any, payload: Dict[str, Any]) -> bool:
         return await self.send_ws_text(ws, json.dumps(payload))
+
+    def set_sensor_info_view(
+        self,
+        ws: Any,
+        enabled: bool,
+        tab: Optional[str],
+        interval_s: float,
+        topic_name: Optional[str] = None,
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        if not isinstance(enabled, bool):
+            return False, "enabled must be boolean", {}
+        try:
+            interval = float(interval_s)
+        except (TypeError, ValueError):
+            return False, "interval_s must be numeric", {}
+        if not math.isfinite(interval):
+            return False, "interval_s must be finite", {}
+
+        normalized_tab = SensorInfoSession.normalize_tab(tab)
+        if enabled and normalized_tab is None:
+            return False, "tab must be one of general|topics|pixhawk_gps|lidar|camera", {}
+        if (not enabled) and tab is not None and normalized_tab is None:
+            return False, "tab must be null or a supported tab when disabling", {}
+
+        with self._lock:
+            session = self._sensor_info_sessions.get(ws)
+        if session is None:
+            return False, "sensor info session unavailable", {}
+        payload = session.configure(
+            enabled=enabled,
+            tab=normalized_tab,
+            interval_s=interval,
+            topic_name=topic_name,
+        )
+        payload["subscription_count"] = session.subscription_count()
+        return True, "", payload
+
+    def get_topics_catalog(self) -> List[Dict[str, Any]]:
+        topics = self.get_topic_names_and_types()
+        catalog: List[Dict[str, Any]] = []
+        for topic_name, topic_types in topics:
+            try:
+                publisher_count = int(self.count_publishers(topic_name))
+            except Exception:
+                publisher_count = None
+            try:
+                subscriber_count = int(self.count_subscribers(topic_name))
+            except Exception:
+                subscriber_count = None
+
+            item: Dict[str, Any] = {
+                "name": str(topic_name),
+                "types": [str(topic_type) for topic_type in list(topic_types or [])],
+            }
+            if publisher_count is not None:
+                item["publisher_count"] = publisher_count
+            if subscriber_count is not None:
+                item["subscriber_count"] = subscriber_count
+            catalog.append(item)
+        catalog.sort(key=lambda entry: str(entry.get("name", "")))
+        return catalog
+
+    def get_datum_info(self) -> Dict[str, Any]:
+        req = GetDatum.Request()
+        res = self._call_service(self._nav_get_datum_client, req, self.request_timeout_s)
+        if res is None:
+            return {
+                "ok": False,
+                "error": "get_datum timeout",
+                "already_set": False,
+                "has_current_gps": False,
+                "gps_is_rtk": False,
+                "current_gps_lat": None,
+                "current_gps_lon": None,
+                "datum_lat": None,
+                "datum_lon": None,
+                "last_set_stamp": None,
+                "last_set_epoch_ms": None,
+                "last_set_source": "",
+                "last_set_with_rtk": False,
+            }
+
+        last_set_stamp = getattr(res, "last_set_stamp", None)
+        current_lat = _finite_or_none(getattr(res, "current_gps_lat", None))
+        current_lon = _finite_or_none(getattr(res, "current_gps_lon", None))
+        datum_lat = _finite_or_none(getattr(res, "datum_lat", None))
+        datum_lon = _finite_or_none(getattr(res, "datum_lon", None))
+        return {
+            "ok": bool(getattr(res, "ok", False)),
+            "error": str(getattr(res, "error", "") or ""),
+            "already_set": bool(getattr(res, "already_set", False)),
+            "has_current_gps": bool(getattr(res, "has_current_gps", False)),
+            "gps_is_rtk": bool(getattr(res, "gps_is_rtk", False)),
+            "current_gps_lat": current_lat,
+            "current_gps_lon": current_lon,
+            "datum_lat": datum_lat,
+            "datum_lon": datum_lon,
+            "last_set_stamp": _stamp_to_dict(last_set_stamp) if last_set_stamp is not None else None,
+            "last_set_epoch_ms": _stamp_to_epoch_ms(last_set_stamp),
+            "last_set_source": str(getattr(res, "last_set_source", "") or ""),
+            "last_set_with_rtk": bool(getattr(res, "last_set_with_rtk", False)),
+        }
 
     def snapshot_state(self) -> Dict[str, Any]:
         with self._lock:
@@ -640,6 +1490,11 @@ class WebZoneServerNode(Node):
             self.stop_rosbag()
         except Exception:
             pass
+        with self._lock:
+            sessions = list(self._sensor_info_sessions.values())
+            self._sensor_info_sessions = {}
+        for session in sessions:
+            session.close()
 
     async def _broadcast(self, payload: Dict[str, Any]) -> None:
         text = json.dumps(payload)
@@ -656,10 +1511,16 @@ class WebZoneServerNode(Node):
             except Exception:
                 failed.append(ws)
         if failed:
+            sessions_to_close: List[SensorInfoSession] = []
             with self._lock:
                 for ws in failed:
                     self._ws_clients.discard(ws)
                     self._ws_send_locks.pop(ws, None)
+                    session = self._sensor_info_sessions.pop(ws, None)
+                    if session is not None:
+                        sessions_to_close.append(session)
+            for session in sessions_to_close:
+                session.close()
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
         if not np.isfinite(msg.latitude) or not np.isfinite(msg.longitude):
@@ -1721,6 +2582,28 @@ class WebSocketApi:
                 payload = dict(payload)
                 payload["client_req_id"] = client_req_id
             await self._send_json(ws, payload)
+            return
+
+        if op == "set_sensor_info_view":
+            enabled_raw = msg.get("enabled")
+            interval_raw = msg.get("interval_s", 0.1)
+            tab_raw = msg.get("tab")
+            topic_name_raw = msg.get("topic_name")
+            ok, err, payload = self.node.set_sensor_info_view(
+                ws,
+                enabled=enabled_raw,
+                tab=tab_raw,
+                interval_s=interval_raw,
+                topic_name=topic_name_raw,
+            )
+            await self._send_ack(
+                ws,
+                "set_sensor_info_view",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra=payload,
+            )
             return
 
         await self._send_ack(

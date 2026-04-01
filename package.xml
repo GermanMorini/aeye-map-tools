@@ -9,9 +9,12 @@
 
   <depend>rclpy</depend>
   <depend>ament_index_python</depend>
+  <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>diagnostic_msgs</depend>
+  <depend>rosidl_runtime_py</depend>
+  <depend>std_msgs</depend>
   <depend>std_srvs</depend>
   <depend>interfaces</depend>
   <exec_depend>launch</exec_depend>

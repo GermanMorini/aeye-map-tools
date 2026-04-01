@@ -31,6 +31,15 @@ def generate_launch_description():
     nav_telemetry_topic = LaunchConfiguration("nav_telemetry_topic")
     camera_pan_service = LaunchConfiguration("camera_pan_service")
     camera_status_service = LaunchConfiguration("camera_status_service")
+    imu_topic = LaunchConfiguration("imu_topic")
+    velocity_topic = LaunchConfiguration("velocity_topic")
+    fix_type_topic = LaunchConfiguration("fix_type_topic")
+    rtk_status_topic = LaunchConfiguration("rtk_status_topic")
+    rtcm_age_topic = LaunchConfiguration("rtcm_age_topic")
+    rtcm_count_topic = LaunchConfiguration("rtcm_count_topic")
+    gps_raw_topic = LaunchConfiguration("gps_raw_topic")
+    rtk_source_status_topic = LaunchConfiguration("rtk_source_status_topic")
+    nav_get_datum_service = LaunchConfiguration("nav_get_datum_service")
 
     request_timeout_s = LaunchConfiguration("request_timeout_s")
     snapshot_request_timeout_s = LaunchConfiguration("snapshot_request_timeout_s")
@@ -97,6 +106,21 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "camera_status_service",
                 default_value="/camara/camera_status",
+            ),
+            DeclareLaunchArgument("imu_topic", default_value="/imu/data"),
+            DeclareLaunchArgument("velocity_topic", default_value="/velocity"),
+            DeclareLaunchArgument("fix_type_topic", default_value="/gps/fix_type"),
+            DeclareLaunchArgument("rtk_status_topic", default_value="/gps/rtk_status"),
+            DeclareLaunchArgument("rtcm_age_topic", default_value="/gps/rtcm_age_s"),
+            DeclareLaunchArgument("rtcm_count_topic", default_value="/gps/rtcm_received_count"),
+            DeclareLaunchArgument("gps_raw_topic", default_value="/mavros_node/gps1/raw"),
+            DeclareLaunchArgument(
+                "rtk_source_status_topic",
+                default_value="/gps/rtk_source/status_json",
+            ),
+            DeclareLaunchArgument(
+                "nav_get_datum_service",
+                default_value="/datum_setter/get_datum",
             ),
             DeclareLaunchArgument("request_timeout_s", default_value="5.0"),
             DeclareLaunchArgument("snapshot_request_timeout_s", default_value="2.0"),
@@ -176,6 +200,15 @@ def generate_launch_description():
                         "nav_telemetry_topic": nav_telemetry_topic,
                         "camera_pan_service": camera_pan_service,
                         "camera_status_service": camera_status_service,
+                        "imu_topic": imu_topic,
+                        "velocity_topic": velocity_topic,
+                        "fix_type_topic": fix_type_topic,
+                        "rtk_status_topic": rtk_status_topic,
+                        "rtcm_age_topic": rtcm_age_topic,
+                        "rtcm_count_topic": rtcm_count_topic,
+                        "gps_raw_topic": gps_raw_topic,
+                        "rtk_source_status_topic": rtk_source_status_topic,
+                        "nav_get_datum_service": nav_get_datum_service,
                         "request_timeout_s": request_timeout_s,
                         "snapshot_request_timeout_s": snapshot_request_timeout_s,
                         "set_zones_timeout_s": set_zones_timeout_s,
