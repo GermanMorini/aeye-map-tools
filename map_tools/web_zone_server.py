@@ -48,10 +48,12 @@ from interfaces.srv import (
     GetNavSnapshot,
     GetNavState,
     GetZonesState,
+    SetControlLock,
     SetManualMode,
     SetNavGoalLL,
     SetDatum,
     SetZonesGeoJson,
+    TouchControlHeartbeat,
 )
 from .waypoints_file_utils import load_waypoints_yaml_file, save_waypoints_yaml_file
 
@@ -823,10 +825,11 @@ class WebZoneServerNode(Node):
         self.declare_parameter("ws_port", 8766)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("gps_topic", "/gps/fix")
-        self.declare_parameter("odom_topic", "/odometry/local")
+        self.declare_parameter("odom_topic", "/odometry/filtered")
+        self.declare_parameter("robot_heading_topic", "/odometry/local")
         self.declare_parameter("gps_broadcast_hz", 1.0)
         self.declare_parameter("request_timeout_s", 5.0)
-        self.declare_parameter("snapshot_request_timeout_s", 2.0)
+        self.declare_parameter("snapshot_request_timeout_s", 5.0)
         self.declare_parameter("set_zones_timeout_s", 12.0)
         self.declare_parameter("set_goal_timeout_s", 12.0)
         self.declare_parameter("waypoints_file", "")
@@ -839,6 +842,11 @@ class WebZoneServerNode(Node):
         self.declare_parameter("nav_cancel_goal_service", "/nav_command_server/cancel_goal")
         self.declare_parameter("nav_brake_service", "/nav_command_server/brake")
         self.declare_parameter("nav_set_manual_mode_service", "/nav_command_server/set_manual_mode")
+        self.declare_parameter("nav_set_control_lock_service", "/nav_command_server/set_control_lock")
+        self.declare_parameter(
+            "nav_touch_control_heartbeat_service",
+            "/nav_command_server/touch_control_heartbeat",
+        )
         self.declare_parameter("nav_set_datum_service", "/datum_setter/set_datum")
         self.declare_parameter("nav_get_state_service", "/nav_command_server/get_state")
         self.declare_parameter("teleop_cmd_topic", "/cmd_vel_teleop")
@@ -866,6 +874,7 @@ class WebZoneServerNode(Node):
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.odom_topic = str(self.get_parameter("odom_topic").value)
+        self.robot_heading_topic = str(self.get_parameter("robot_heading_topic").value)
         self.gps_broadcast_hz = float(self.get_parameter("gps_broadcast_hz").value)
         self.request_timeout_s = max(0.5, float(self.get_parameter("request_timeout_s").value))
         self.snapshot_request_timeout_s = max(
@@ -895,6 +904,12 @@ class WebZoneServerNode(Node):
         self.nav_brake_service = str(self.get_parameter("nav_brake_service").value)
         self.nav_set_manual_mode_service = str(
             self.get_parameter("nav_set_manual_mode_service").value
+        )
+        self.nav_set_control_lock_service = str(
+            self.get_parameter("nav_set_control_lock_service").value
+        )
+        self.nav_touch_control_heartbeat_service = str(
+            self.get_parameter("nav_touch_control_heartbeat_service").value
         )
         self.nav_set_datum_service = str(self.get_parameter("nav_set_datum_service").value)
         self.nav_get_state_service = str(self.get_parameter("nav_get_state_service").value)
@@ -950,6 +965,8 @@ class WebZoneServerNode(Node):
             "last_cmd_age_s": None,
         }
         self._goal_active = False
+        self._control_locked = True
+        self._control_lock_reason = "STARTUP_LOCKED"
         self._nav_result_status = 0
         self._nav_result_text = "idle"
         self._nav_result_event_id = 0
@@ -974,8 +991,11 @@ class WebZoneServerNode(Node):
         self._gps_sub = self.create_subscription(
             NavSatFix, self.gps_topic, self._on_gps_fix, qos_profile_sensor_data
         )
-        self._odom_sub = self.create_subscription(
-            Odometry, self.odom_topic, self._on_odometry, 10
+        self._robot_heading_sub = self.create_subscription(
+            Odometry,
+            self.robot_heading_topic,
+            self._on_robot_heading_odom,
+            qos_profile_sensor_data,
         )
         self._nav_telemetry_sub = self.create_subscription(
             NavTelemetry, self.nav_telemetry_topic, self._on_nav_telemetry, 10
@@ -1002,6 +1022,12 @@ class WebZoneServerNode(Node):
         self._nav_set_manual_mode_client = self.create_client(
             SetManualMode, self.nav_set_manual_mode_service
         )
+        self._nav_set_control_lock_client = self.create_client(
+            SetControlLock, self.nav_set_control_lock_service
+        )
+        self._nav_touch_control_heartbeat_client = self.create_client(
+            TouchControlHeartbeat, self.nav_touch_control_heartbeat_service
+        )
         self._nav_set_datum_client = self.create_client(
             SetDatum, self.nav_set_datum_service
         )
@@ -1023,13 +1049,16 @@ class WebZoneServerNode(Node):
             f"(ws={self.ws_host}:{self.ws_port}, zones_set={self.zones_set_geojson_service}, "
             f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service}, "
             f"set_datum={self.nav_set_datum_service}, "
+            f"set_control_lock={self.nav_set_control_lock_service}, "
+            f"touch_control_heartbeat={self.nav_touch_control_heartbeat_service}, "
             f"nav_events={self.nav_events_topic}, diagnostics={self.diagnostics_topic}, "
             f"rosbag_dir={self.rosbag_output_dir}, "
             f"camera_pan={self.camera_pan_service}, camera_zoom_toggle={self.camera_zoom_toggle_service}, "
             f"camera_status={self.camera_status_service}, "
             f"get_datum={self.nav_get_datum_service}, "
             f"teleop_topic={self.teleop_cmd_topic}, gps_topic={self.gps_topic}, "
-            f"odom_topic={self.odom_topic})"
+            f"odom_topic={self.odom_topic}, "
+            f"robot_heading_topic={self.robot_heading_topic})"
         )
         self.get_logger().info(f"Waypoints file path: {self.waypoints_file}")
 
@@ -1041,6 +1070,21 @@ class WebZoneServerNode(Node):
             count = len(self._ws_clients)
         self.get_logger().info(f"WS client connected (clients={count})")
 
+    def _engage_lock_if_no_clients(self) -> None:
+        with self._lock:
+            no_clients = len(self._ws_clients) == 0
+        if not no_clients:
+            return
+        ok, err, locked_after = self.set_control_lock(True)
+        if ok:
+            self.get_logger().info(
+                f"Control lock engaged because no WS clients remain (locked={locked_after})"
+            )
+        else:
+            self.get_logger().warning(
+                f"Failed to engage control lock after last WS disconnect: {err}"
+            )
+
     def remove_client(self, ws: Any) -> None:
         with self._lock:
             sensor_info_session = self._sensor_info_sessions.pop(ws, None)
@@ -1050,6 +1094,8 @@ class WebZoneServerNode(Node):
         if sensor_info_session is not None:
             sensor_info_session.close()
         self.get_logger().info(f"WS client disconnected (clients={count})")
+        if count == 0:
+            self._engage_lock_if_no_clients()
 
     async def send_ws_text(self, ws: Any, text: str) -> bool:
         with self._lock:
@@ -1179,6 +1225,8 @@ class WebZoneServerNode(Node):
                 "cmd_vel_safe": dict(self._cmd_vel_safe),
                 "manual_control": dict(self._manual_control),
                 "goal_active": bool(self._goal_active),
+                "control_locked": bool(self._control_locked),
+                "control_lock_reason": str(self._control_lock_reason),
                 "nav_result_status": int(self._nav_result_status),
                 "nav_result_text": str(self._nav_result_text),
                 "nav_result_event_id": int(self._nav_result_event_id),
@@ -1193,6 +1241,8 @@ class WebZoneServerNode(Node):
             cmd_vel_safe = dict(self._cmd_vel_safe)
             manual_control = dict(self._manual_control)
             goal_active = bool(self._goal_active)
+            control_locked = bool(self._control_locked)
+            control_lock_reason = str(self._control_lock_reason)
             nav_result_status = int(self._nav_result_status)
             nav_result_text = str(self._nav_result_text)
             nav_result_event_id = int(self._nav_result_event_id)
@@ -1203,6 +1253,8 @@ class WebZoneServerNode(Node):
             "cmd_vel_safe": cmd_vel_safe,
             "manual_control": manual_control,
             "goal_active": goal_active,
+            "control_locked": control_locked,
+            "control_lock_reason": control_lock_reason,
             "nav_result_status": nav_result_status,
             "nav_result_text": nav_result_text,
             "nav_result_event_id": nav_result_event_id,
@@ -1512,6 +1564,7 @@ class WebZoneServerNode(Node):
                 failed.append(ws)
         if failed:
             sessions_to_close: List[SensorInfoSession] = []
+            remaining = 0
             with self._lock:
                 for ws in failed:
                     self._ws_clients.discard(ws)
@@ -1519,8 +1572,11 @@ class WebZoneServerNode(Node):
                     session = self._sensor_info_sessions.pop(ws, None)
                     if session is not None:
                         sessions_to_close.append(session)
+                remaining = len(self._ws_clients)
             for session in sessions_to_close:
                 session.close()
+            if remaining == 0:
+                self._engage_lock_if_no_clients()
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
         if not np.isfinite(msg.latitude) or not np.isfinite(msg.longitude):
@@ -1582,7 +1638,7 @@ class WebZoneServerNode(Node):
             pose["heading_deg"] = float(heading_deg)
         return pose
 
-    def _on_odometry(self, msg: Odometry) -> None:
+    def _on_robot_heading_odom(self, msg: Odometry) -> None:
         q = msg.pose.pose.orientation
         heading_deg = self._yaw_deg_from_quaternion(
             float(q.x), float(q.y), float(q.z), float(q.w)
@@ -1603,6 +1659,8 @@ class WebZoneServerNode(Node):
                 "angular_z": float(msg.cmd_vel_angular_z),
             }
             self._goal_active = bool(msg.goal_active)
+            self._control_locked = bool(getattr(msg, "control_locked", False))
+            self._control_lock_reason = str(getattr(msg, "control_lock_reason", "") or "")
             self._nav_result_status = int(getattr(msg, "nav_result_status", 0))
             self._nav_result_text = str(getattr(msg, "nav_result_text", ""))
             self._nav_result_event_id = int(getattr(msg, "nav_result_event_id", 0))
@@ -1830,6 +1888,10 @@ class WebZoneServerNode(Node):
     def _update_nav_state(self, response: GetNavState.Response) -> None:
         with self._lock:
             self._goal_active = bool(response.goal_active)
+            self._control_locked = bool(getattr(response, "control_locked", False))
+            self._control_lock_reason = str(
+                getattr(response, "control_lock_reason", "") or ""
+            )
             self._cmd_vel_safe = {
                 "available": bool(response.cmd_vel_available),
                 "linear_x": float(response.cmd_vel_linear_x),
@@ -1911,6 +1973,14 @@ class WebZoneServerNode(Node):
     ) -> Tuple[bool, str, int, bool]:
         if len(waypoints) == 0:
             return False, "at least one waypoint is required", 0, False
+        with self._lock:
+            if self._control_locked:
+                return (
+                    False,
+                    f"control locked: {self._control_lock_reason or 'locked'}",
+                    len(waypoints),
+                    bool(loop),
+                )
 
         self.get_logger().info(
             f"WS->ROS set_nav_goals (count={len(waypoints)}, loop={bool(loop)})"
@@ -1967,6 +2037,10 @@ class WebZoneServerNode(Node):
         return bool(res.ok), str(res.error)
 
     def set_manual_mode(self, enabled: bool) -> Tuple[bool, str, bool]:
+        if bool(enabled):
+            with self._lock:
+                if self._control_locked:
+                    return False, f"control locked: {self._control_lock_reason or 'locked'}", False
         req = SetManualMode.Request()
         req.enabled = bool(enabled)
         res = self._call_service(self._nav_set_manual_mode_client, req, self.request_timeout_s)
@@ -1981,6 +2055,9 @@ class WebZoneServerNode(Node):
     ) -> Tuple[bool, str]:
         if not np.isfinite(linear_x) or not np.isfinite(angular_z):
             return False, "invalid manual command values"
+        with self._lock:
+            if self._control_locked:
+                return False, f"control locked: {self._control_lock_reason or 'locked'}"
 
         brake_pct_clamped = max(0, min(100, int(brake_pct)))
 
@@ -1997,6 +2074,38 @@ class WebZoneServerNode(Node):
             self._manual_control["last_cmd_age_s"] = 0.0
 
         return True, ""
+
+    def set_control_lock(self, locked: bool) -> Tuple[bool, str, bool]:
+        req = SetControlLock.Request()
+        req.locked = bool(locked)
+        res = self._call_service(self._nav_set_control_lock_client, req, self.request_timeout_s)
+        if res is None:
+            return False, "set_control_lock timeout", bool(locked)
+        locked_after = bool(getattr(res, "locked_after", locked))
+        with self._lock:
+            self._control_locked = locked_after
+            self._control_lock_reason = "UI_LOCK_REQUEST" if locked_after else ""
+        if res.ok:
+            self.get_nav_state()
+        return bool(res.ok), str(res.error), locked_after
+
+    def touch_control_heartbeat(self) -> Tuple[bool, str, bool]:
+        req = TouchControlHeartbeat.Request()
+        res = self._call_service(
+            self._nav_touch_control_heartbeat_client,
+            req,
+            self.request_timeout_s,
+        )
+        if res is None:
+            return False, "control_heartbeat timeout", True
+        locked = bool(getattr(res, "locked", False))
+        with self._lock:
+            self._control_locked = locked
+            if locked and not self._control_lock_reason:
+                self._control_lock_reason = "LOCKED"
+            if not locked:
+                self._control_lock_reason = ""
+        return bool(res.ok), str(getattr(res, "error", "")), locked
 
     def set_datum_current(self) -> Tuple[bool, str]:
         req = SetDatum.Request()
@@ -2288,7 +2397,7 @@ class WebSocketApi:
 
         client_req_id = self._extract_client_req_id(msg)
         op = msg.get("op")
-        if op != "set_manual_cmd":
+        if op not in {"set_manual_cmd", "control_heartbeat"}:
             self.node.get_logger().info(f"WS op received: {op}")
         if op == "get_state":
             payload = self.node.snapshot_state()
@@ -2416,6 +2525,57 @@ class WebSocketApi:
             ok, err = await asyncio.to_thread(self.node.cancel_nav_goal)
             await self._send_ack(
                 ws, "cancel_goal", ok, err, client_req_id=client_req_id
+            )
+            return
+
+        if op == "set_control_lock":
+            locked_raw = msg.get("locked")
+            if not isinstance(locked_raw, bool):
+                await self._send_ack(
+                    ws,
+                    "set_control_lock",
+                    False,
+                    "locked must be boolean",
+                    client_req_id=client_req_id,
+                )
+                return
+            ok, err, locked_after = await asyncio.to_thread(
+                self.node.set_control_lock,
+                locked_raw,
+            )
+            await self._send_ack(
+                ws,
+                "set_control_lock",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={
+                    "locked": bool(locked_after),
+                    "control_locked": bool(locked_after),
+                    "control_lock_reason": self.node.snapshot_state().get(
+                        "control_lock_reason", ""
+                    ),
+                },
+            )
+            if ok:
+                await self.node._broadcast(self.node.snapshot_state())
+            return
+
+        if op == "control_heartbeat":
+            ok, err, locked = await asyncio.to_thread(self.node.touch_control_heartbeat)
+            await self._send_ack(
+                ws,
+                "control_heartbeat",
+                ok,
+                err,
+                client_req_id=client_req_id,
+                extra={
+                    "locked": bool(locked),
+                    "control_locked": bool(locked),
+                    "control_lock_reason": self.node.snapshot_state().get(
+                        "control_lock_reason", ""
+                    ),
+                },
             )
             return
 

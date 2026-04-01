@@ -2,6 +2,7 @@ import asyncio
 import threading
 
 from diagnostic_msgs.msg import DiagnosticStatus
+from nav_msgs.msg import Odometry
 
 from map_tools.web_zone_server import (
     ROSBAG_TOPIC_PROFILES,
@@ -22,6 +23,8 @@ class _FakeNode:
     _diag_level_value = staticmethod(WebZoneServerNode._diag_level_value)
     _should_surface_diagnostic = WebZoneServerNode._should_surface_diagnostic
     _rosbag_topics_for_profile = staticmethod(WebZoneServerNode._rosbag_topics_for_profile)
+    _yaw_deg_from_quaternion = WebZoneServerNode._yaw_deg_from_quaternion
+    _on_robot_heading_odom = WebZoneServerNode._on_robot_heading_odom
 
 
 class _FakeStatus:
@@ -39,11 +42,25 @@ class _FakePublisher:
         self.messages.append(msg)
 
 
+class _FakeLogger:
+    def __init__(self) -> None:
+        self.info_msgs = []
+        self.warn_msgs = []
+
+    def info(self, msg: str) -> None:
+        self.info_msgs.append(str(msg))
+
+    def warning(self, msg: str) -> None:
+        self.warn_msgs.append(str(msg))
+
+
 class _FakeManualNode:
     set_manual_cmd = WebZoneServerNode.set_manual_cmd
 
-    def __init__(self, manual_enabled: bool) -> None:
+    def __init__(self, manual_enabled: bool, control_locked: bool = False) -> None:
         self._lock = threading.Lock()
+        self._control_locked = bool(control_locked)
+        self._control_lock_reason = "STARTUP_LOCKED" if control_locked else ""
         self._manual_control = {
             "enabled": bool(manual_enabled),
             "linear_x_cmd": 0.0,
@@ -57,6 +74,34 @@ class _FakeManualNode:
     def set_manual_mode(self, enabled: bool):
         self.mode_calls += 1
         return True, "", bool(enabled)
+
+
+class _FakeClosableSession:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeRemoveClientNode:
+    remove_client = WebZoneServerNode.remove_client
+    _engage_lock_if_no_clients = WebZoneServerNode._engage_lock_if_no_clients
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._ws_clients = {"ws-1"}
+        self._ws_send_locks = {"ws-1": object()}
+        self._sensor_info_sessions = {"ws-1": _FakeClosableSession()}
+        self.lock_requests = []
+        self.logger = _FakeLogger()
+
+    def set_control_lock(self, locked: bool):
+        self.lock_requests.append(bool(locked))
+        return True, "", bool(locked)
+
+    def get_logger(self):
+        return self.logger
 
 
 def test_should_surface_diagnostic_accepts_navigation_errors():
@@ -132,6 +177,27 @@ def test_set_manual_cmd_invalid_values_still_fail() -> None:
     assert err == "invalid manual command values"
     assert node.mode_calls == 0
     assert len(node._teleop_cmd_pub.messages) == 0
+
+
+def test_set_manual_cmd_rejects_when_control_locked() -> None:
+    node = _FakeManualNode(manual_enabled=True, control_locked=True)
+
+    ok, err = node.set_manual_cmd(0.5, -0.2, 0)
+
+    assert ok is False
+    assert err == "control locked: STARTUP_LOCKED"
+    assert node.mode_calls == 0
+    assert len(node._teleop_cmd_pub.messages) == 0
+
+
+def test_remove_client_locks_when_last_ws_client_disconnects() -> None:
+    node = _FakeRemoveClientNode()
+
+    node.remove_client("ws-1")
+
+    assert node.lock_requests == [True]
+    assert node._ws_clients == set()
+    assert node._sensor_info_sessions == {}
 
 
 class _FakeSetDatumRequest:
@@ -218,6 +284,23 @@ def test_sensor_info_fix_quality_and_precision_mapping_matches_contract() -> Non
     assert _estimated_precision_for_fix(2) is None
 
 
+def test_robot_heading_updates_robot_pose_heading_from_odometry_local() -> None:
+    node = _FakeNode()
+    node._lock = threading.Lock()
+    node._last_robot_heading_deg = None
+    node._last_robot_pose = {"lat": -31.0, "lon": -64.0}
+
+    msg = Odometry()
+    msg.pose.pose.orientation.z = 0.70710678118
+    msg.pose.pose.orientation.w = 0.70710678118
+
+    node._on_robot_heading_odom(msg)
+
+    assert node._last_robot_heading_deg is not None
+    assert abs(node._last_robot_heading_deg - 90.0) < 1.0e-3
+    assert abs(node._last_robot_pose["heading_deg"] - 90.0) < 1.0e-3
+
+
 class _FakeSensorInfoNode:
     def __init__(self, loop) -> None:
         self._loop = loop
@@ -230,7 +313,7 @@ class _FakeSensorInfoNode:
         self.info_gps_raw_topic = "/mavros_node/gps1/raw"
         self.info_imu_topic = "/imu/data"
         self.info_velocity_topic = "/velocity"
-        self.info_odom_topic = "/odometry/local"
+        self.info_odom_topic = "/odometry/filtered"
         self.created = []
         self.destroyed = []
         self.sent_payloads = []

@@ -61,6 +61,7 @@
       flex: 1 1 auto;
       min-width: 0;
       min-height: 0;
+      align-self: flex-start;
     }
     .visual-top-row .panel-section.camera {
       flex: 0 0 150px;
@@ -168,13 +169,13 @@
       flex-direction: column;
       gap: 10px;
       min-height: 0;
-      height: clamp(250px, 32vh, 360px);
+      height: auto;
     }
     .telemetry-feed-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
-      flex: 1 1 auto;
+      flex: 0 0 auto;
       min-height: 0;
     }
     .telemetry-feed {
@@ -187,6 +188,10 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
+      flex: 0 0 auto;
+      height: 158px;
+      max-height: 158px;
+      overflow: hidden;
     }
     .telemetry-feed h3 {
       margin: 0;
@@ -200,7 +205,9 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
-      flex: 1 1 auto;
+      flex: 0 0 120px;
+      height: 120px;
+      max-height: 120px;
       min-height: 0;
       overflow: auto;
     }
@@ -217,6 +224,10 @@
     .telemetry-feed-item.warn {
       border-color: rgba(181, 71, 8, 0.35);
       background: #fff7ed;
+    }
+    .telemetry-feed-item.latest {
+      border-color: rgba(181, 71, 8, 0.55);
+      background: #ffedd5;
     }
     .telemetry-feed-item.bad {
       border-color: rgba(180, 35, 24, 0.35);
@@ -599,6 +610,46 @@
       font-size: 20px;
       line-height: 1;
       backdrop-filter: blur(2px);
+    }
+    .view-stage-unlock-overlay {
+      position: absolute;
+      left: 62px;
+      bottom: 12px;
+      z-index: 1300;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: auto;
+    }
+    .view-stage-unlock-btn {
+      width: 42px;
+      min-width: 42px;
+      max-width: 42px;
+      min-height: 34px;
+      padding: 4px;
+      font-size: 20px;
+      line-height: 1;
+      backdrop-filter: blur(2px);
+    }
+    .view-stage-unlock-icon {
+      font-size: 20px;
+      line-height: 1;
+    }
+    .view-stage-unlock-label {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 10px;
+      border-radius: 9px;
+      border: 1px solid rgba(93, 117, 144, 0.95);
+      background: rgba(255, 255, 255, 0.92);
+      color: #102235;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1;
+      box-shadow: 0 6px 16px rgba(17, 34, 52, 0.22);
+      backdrop-filter: blur(2px);
+      white-space: nowrap;
     }
     #viewStage.mode-camera-main #cameraPane {
       inset: 0;
@@ -1081,10 +1132,10 @@
       align-items: flex-start;
       justify-content: flex-start;
       flex-direction: column;
-      gap: 4px;
-      min-height: 64px;
+      gap: 0;
+      min-height: 42px;
       height: auto;
-      padding: 10px 12px;
+      padding: 9px 12px;
       line-height: 1.25;
       white-space: normal;
       overflow: hidden;
@@ -1101,20 +1152,35 @@
       word-break: break-word;
       overflow-wrap: anywhere;
     }
-    .info-topic-item-meta {
-      display: block;
-      width: 100%;
-      font-size: 11px;
-      opacity: 0.8;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-    }
     .info-topics-content-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
       flex-wrap: wrap;
+    }
+    .info-topics-selected-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1 1 auto;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+    .info-topics-selected-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #edf4fb;
+      border: 1px solid #c7d9eb;
+      color: #244261;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.2;
+      word-break: break-word;
+      overflow-wrap: anywhere;
     }
     .info-topics-copy-btn {
       width: auto;
@@ -1188,6 +1254,10 @@
       #swapViewBtn {
         bottom: 10px;
         left: 10px;
+      }
+      .view-stage-unlock-overlay {
+        left: 60px;
+        bottom: 10px;
       }
       #viewStage.mode-camera-main #gpsPane,
       #viewStage.mode-gps-main #cameraPane {
@@ -1314,7 +1384,7 @@
 
         <section class="panel-section navigation">
           <h2>Navigation</h2>
-          <div class="stack">
+          <div id="navControls" class="stack">
             <div class="nav-grid-4">
               <button id="goalModeBtn" class="secondary icon-only" title="modo insercion de waypoints (F) · OFF" aria-label="modo insercion de waypoints (F) · OFF">📌</button>
               <button id="popGoalBtn" class="secondary icon-only" title="Undo waypoint" aria-label="Undo waypoint" disabled>↩️</button>
@@ -1438,6 +1508,13 @@
           </div>
         </div>
         <button id="swapViewBtn" class="secondary" type="button" title="intercambiar camara/mapa (E)" aria-label="intercambiar camara/mapa (E)">🔄</button>
+        <div id="unlockControlOverlay" class="view-stage-unlock-overlay hidden">
+          <button id="unlockControlBtn" class="secondary view-stage-unlock-btn" type="button" title="Desbloquear" aria-label="Desbloquear">
+            <span id="unlockControlIcon" class="view-stage-unlock-icon" aria-hidden="true">🔒</span>
+            <span class="btn-label hidden">Unlock</span>
+          </button>
+          <div id="unlockControlText" class="view-stage-unlock-label">← Desbloquear</div>
+        </div>
       </div>
     </div>
   </div>
@@ -1671,6 +1748,13 @@
       cameraStreamSeq: 0,
       cameraArrowKeys: { up: false, down: false, left: false, right: false },
       cameraArrowTimer: null,
+      controlLock: {
+        locked: true,
+        reason: 'STARTUP_LOCKED',
+        heartbeatTimer: null,
+        unlockGraceUntilMs: 0
+      },
+      manualDisablePending: false,
       manualControl: { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0, last_cmd_age_s: null },
       manualKeys: { w: false, a: false, s: false, d: false },
       manualBrakeHeld: false,
@@ -1860,6 +1944,7 @@
     const CAMERA_STREAM_PROBE_TIMEOUT_MS = 3000;
     const CAMERA_STREAM_LOAD_TIMEOUT_MS = 7000;
     const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
+    const CONTROL_HEARTBEAT_INTERVAL_MS = 2000;
     const REQUEST_TIMEOUT_OVERRIDES_MS = {
       set_goal_ll: 15000
     };
@@ -1901,6 +1986,11 @@
       },
       set_manual_mode: {
         buttons: {}
+      },
+      set_control_lock: {
+        buttons: {
+          unlockControlBtn: { pending: 'Unlocking...' }
+        }
       },
       set_datum: {
         buttons: {
@@ -1989,6 +2079,7 @@
       if (!el) return;
       el.textContent = connected ? 'connected' : 'disconnected';
       el.className = connected ? 'status good' : 'status';
+      renderNavigationLockUi();
       renderRosbagUi();
     }
 
@@ -2872,9 +2963,12 @@
     }
 
     function yawDegFromLatLng(origin, target) {
-      const dx = Number(target.lng) - Number(origin.lng);
-      const dy = Number(target.lat) - Number(origin.lat);
-      const yawDeg = Math.atan2(dy, dx) * 180.0 / Math.PI;
+      const refLat = Number(origin.lat);
+      const metersPerDegLat = 111320.0;
+      const metersPerDegLon = metersPerDegLat * Math.max(1.0e-6, Math.abs(Math.cos(refLat * Math.PI / 180.0)));
+      const eastM = (Number(target.lng) - Number(origin.lng)) * metersPerDegLon;
+      const northM = (Number(target.lat) - Number(origin.lat)) * metersPerDegLat;
+      const yawDeg = Math.atan2(northM, eastM) * 180.0 / Math.PI;
       return normalizeYawDeg(yawDeg);
     }
 
@@ -2897,7 +2991,9 @@
     }
 
     function buildRobotIcon(headingDeg) {
-      const hasHeading = Number.isFinite(Number(headingDeg));
+      const hasHeading = headingDeg !== null
+        && headingDeg !== undefined
+        && Number.isFinite(Number(headingDeg));
       const yaw = hasHeading ? normalizeYawDeg(Number(headingDeg)) : 0.0;
       const cssRotationDeg = normalizeYawDeg(90.0 - yaw);
       const classes = hasHeading ? 'robot-icon' : 'robot-icon no-heading';
@@ -2992,13 +3088,135 @@
       }
     }
 
+    function isControlLocked() {
+      return state.controlLock.locked === true;
+    }
+
+    function formatControlLockReason(reason) {
+      const value = String(reason || '').trim();
+      if (!value) return 'Robot locked';
+      const labels = {
+        STARTUP_LOCKED: 'Robot locked at startup',
+        UI_LOCK_REQUEST: 'Robot locked from UI',
+        UI_HEARTBEAT_TIMEOUT: 'Robot locked by missing UI heartbeat',
+        DISCONNECTED: 'Robot locked until the backend confirms unlock',
+        LOCKED: 'Robot locked'
+      };
+      return labels[value] || `Robot locked: ${value}`;
+    }
+
+    function stopControlHeartbeat() {
+      if (state.controlLock.heartbeatTimer) {
+        window.clearInterval(state.controlLock.heartbeatTimer);
+        state.controlLock.heartbeatTimer = null;
+      }
+    }
+
+    function sendControlHeartbeat() {
+      if (isControlLocked()) return;
+      if (!state.connected || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+      send({ op: 'control_heartbeat' }, { track: false });
+    }
+
+    function startControlHeartbeat() {
+      stopControlHeartbeat();
+      if (isControlLocked()) return;
+      if (!state.connected || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+      state.controlLock.heartbeatTimer = window.setInterval(
+        sendControlHeartbeat,
+        CONTROL_HEARTBEAT_INTERVAL_MS
+      );
+      sendControlHeartbeat();
+    }
+
+    function renderNavigationLockUi() {
+      const overlay = document.getElementById('unlockControlOverlay');
+      const overlayText = document.getElementById('unlockControlText');
+      const unlockBtn = document.getElementById('unlockControlBtn');
+      const unlockIcon = document.getElementById('unlockControlIcon');
+      const navControls = document.getElementById('navControls');
+      if (!overlay || !overlayText || !unlockBtn || !unlockIcon || !navControls) return;
+
+      const locked = isControlLocked();
+      overlay.classList.toggle('hidden', !locked);
+      overlay.style.display = locked ? 'flex' : 'none';
+      navControls.style.pointerEvents = 'auto';
+      navControls.setAttribute('aria-disabled', locked ? 'true' : 'false');
+
+      if (locked) {
+        overlayText.textContent = '← Desbloquear';
+        overlayText.title = formatControlLockReason(state.controlLock.reason);
+        unlockBtn.disabled = !(state.connected && state.ws && state.ws.readyState === WebSocket.OPEN);
+        unlockIcon.textContent = '🔒';
+      } else {
+        overlayText.textContent = '← Desbloquear';
+        overlayText.title = '';
+        unlockBtn.disabled = false;
+        unlockIcon.textContent = '🔓';
+      }
+
+      document.getElementById('manualModeBtn').disabled = locked;
+    }
+
+    function syncControlLockFromServer(locked, reason, options = {}) {
+      const prevLocked = isControlLocked();
+      const nextLocked = locked === true;
+      const nowMs = Date.now();
+      const unlockGraceUntilMs = Number(state.controlLock.unlockGraceUntilMs || 0);
+      const ignoreStaleRelock =
+        !prevLocked &&
+        nextLocked &&
+        nowMs < unlockGraceUntilMs &&
+        options.overrideGrace !== true;
+      if (ignoreStaleRelock) {
+        return;
+      }
+      state.controlLock.locked = nextLocked;
+      state.controlLock.reason = String(reason || '');
+      if (nextLocked) {
+        state.controlLock.unlockGraceUntilMs = 0;
+      } else if (options.startUnlockGrace === true) {
+        state.controlLock.unlockGraceUntilMs = nowMs + 2000;
+      } else if (unlockGraceUntilMs <= nowMs) {
+        state.controlLock.unlockGraceUntilMs = 0;
+      }
+
+      if (nextLocked) {
+        stopControlHeartbeat();
+        stopManualLoop();
+        resetManualLocalState();
+        state.manualControl.enabled = false;
+        state.pendingGoalAfterManualOff = null;
+        if (state.goalMode) {
+          cancelGoalDraft();
+          setGoalModeUi(false);
+        }
+      } else if (state.connected && !state.controlLock.heartbeatTimer) {
+        startControlHeartbeat();
+      }
+
+      renderNavigationLockUi();
+      updateGoalButtonsState();
+      renderManualStatus();
+
+      if (nextLocked && !prevLocked) {
+        const goalStatusEl = document.getElementById('goalStatus');
+        if (goalStatusEl) {
+          goalStatusEl.textContent = formatControlLockReason(state.controlLock.reason);
+          goalStatusEl.className = 'status bad';
+        }
+      }
+    }
+
     function updateGoalButtonsState() {
+      const locked = isControlLocked();
       const hasWaypoints = state.goalWaypoints.length > 0;
       const hasSelection = state.selectedWaypointIndices.size > 0;
-      document.getElementById('sendGoalsBtn').disabled = !hasWaypoints;
+      document.getElementById('sendGoalsBtn').disabled = locked || !hasWaypoints;
       document.getElementById('popGoalBtn').disabled = !hasWaypoints;
       document.getElementById('clearGoalsBtn').disabled = !hasWaypoints;
       document.getElementById('removeSelectedGoalsBtn').disabled = !hasSelection;
+      document.getElementById('manualModeBtn').disabled = locked;
     }
 
     function clearWaypointSelection() {
@@ -3110,6 +3328,10 @@
     }
 
     function sendCurrentWaypoints() {
+      if (isControlLocked()) {
+        updateWaypointStatus(formatControlLockReason(state.controlLock.reason), false);
+        return;
+      }
       if (state.goalWaypoints.length === 0) {
         updateWaypointStatus('Add at least one waypoint before sending', false);
         return;
@@ -3211,6 +3433,10 @@
     }
 
     function toggleWaypointInsertionMode() {
+      if (isControlLocked()) {
+        setStatus(formatControlLockReason(state.controlLock.reason), false);
+        return;
+      }
       if (!isGpsMainView()) {
         setStatus('GPS en minimapa: intercambiá a GPS grande para editar waypoints', false);
         return;
@@ -3220,7 +3446,21 @@
 
     function toggleManualModeRequest() {
       const nextEnabled = !state.manualControl.enabled;
-      send({ op: 'set_manual_mode', enabled: nextEnabled });
+      if (nextEnabled && isControlLocked()) {
+        setStatus(formatControlLockReason(state.controlLock.reason), false);
+        return;
+      }
+      if (!nextEnabled) {
+        state.manualDisablePending = true;
+        stopManualLoop();
+        resetManualLocalState();
+        renderManualStatus();
+      }
+      const reqId = send({ op: 'set_manual_mode', enabled: nextEnabled });
+      if (reqId == null && !nextEnabled) {
+        state.manualDisablePending = false;
+        renderManualStatus();
+      }
     }
 
     function toggleSwapView() {
@@ -3389,8 +3629,42 @@
       return new Date(ms).toLocaleTimeString();
     }
 
+    function alertSignature(alert) {
+      if (!alert || typeof alert !== 'object') return '';
+      const level = Number(alert.level || 0);
+      const name = String(alert.name || '');
+      const message = String(alert.message || '');
+      return `${level}|${name}|${message}`;
+    }
+
     function setAlerts(alerts) {
-      state.alerts = Array.isArray(alerts) ? alerts.slice(0, 12) : [];
+      const incoming = Array.isArray(alerts) ? alerts : [];
+      const next = [];
+      const seen = new Set();
+
+      incoming.forEach((alert) => {
+        const signature = alertSignature(alert);
+        if (!signature || seen.has(signature)) return;
+        seen.add(signature);
+        next.push({
+          ...alert,
+          _signature: signature,
+          _receivedAtEpochMs: Date.now()
+        });
+      });
+
+      state.alerts.forEach((alert) => {
+        const signature = String(alert && alert._signature ? alert._signature : alertSignature(alert));
+        if (!signature || seen.has(signature)) return;
+        seen.add(signature);
+        next.push({
+          ...alert,
+          _signature: signature,
+          _receivedAtEpochMs: Number(alert && alert._receivedAtEpochMs) || 0
+        });
+      });
+
+      state.alerts = next.slice(0, 40);
       renderAlerts();
     }
 
@@ -3409,6 +3683,31 @@
       renderRecentEvents();
     }
 
+    function syncControlLockFromNavEvent(eventPayload) {
+      if (!eventPayload || typeof eventPayload !== 'object') return;
+      const code = String(eventPayload.code || '').trim();
+      const details = eventPayload.details && typeof eventPayload.details === 'object'
+        ? eventPayload.details
+        : null;
+      const detailReason = details && details.reason != null
+        ? String(details.reason || '').trim()
+        : '';
+
+      if (code === 'CONTROL_LOCK_RELEASED') {
+        syncControlLockFromServer(false, detailReason);
+        return;
+      }
+
+      if (code === 'CONTROL_LOCK_ENGAGED') {
+        syncControlLockFromServer(true, detailReason || 'UI_LOCK_REQUEST');
+        return;
+      }
+
+      if (code === 'UI_HEARTBEAT_TIMEOUT') {
+        syncControlLockFromServer(true, detailReason || 'UI_HEARTBEAT_TIMEOUT');
+      }
+    }
+
     function renderAlerts() {
       const list = document.getElementById('alertsList');
       if (!list) return;
@@ -3420,9 +3719,9 @@
         list.appendChild(item);
         return;
       }
-      state.alerts.forEach((alert) => {
+      state.alerts.forEach((alert, index) => {
         const item = document.createElement('li');
-        item.className = `telemetry-feed-item ${diagnosticLevelClass(alert.level)}`;
+        item.className = `telemetry-feed-item ${diagnosticLevelClass(alert.level)}${index === 0 ? ' latest' : ''}`;
 
         const meta = document.createElement('div');
         meta.className = 'telemetry-feed-meta';
@@ -3704,6 +4003,7 @@
         topicsState.pendingTopic || topicsState.selectedTopic || snapshot.selected_topic || ''
       );
       const selectedType = String(topicsState.selectedType || snapshot.selected_type || '');
+      const selectedCatalogItem = catalog.find((item) => String(item.name || '') === selectedTopic) || null;
       const historyText = String(topicsState.copiableText || snapshot.history_text || '');
       const copyDisabled = historyText.length === 0;
 
@@ -3711,15 +4011,10 @@
         ? '<div class="info-topics-empty">No hay topics que coincidan con la busqueda.</div>'
         : filteredCatalog.map((item) => {
           const name = String(item.name || '');
-          const types = Array.isArray(item.types) ? item.types.map((entry) => String(entry)).join(', ') : 'n/a';
-          const publishers = Number.isFinite(Number(item.publisher_count)) ? `pub=${Number(item.publisher_count)}` : 'pub=n/a';
-          const subscribers = Number.isFinite(Number(item.subscriber_count)) ? `sub=${Number(item.subscriber_count)}` : 'sub=n/a';
           const activeClass = name === selectedTopic ? ' active' : '';
           return (
             `<button class="secondary info-topic-item${activeClass}" type="button" data-topic-name="${escapeHtml(name)}">` +
               `<span class="info-topic-item-name">${escapeHtml(name)}</span>` +
-              `<span class="info-topic-item-meta">${escapeHtml(types)}</span>` +
-              `<span class="info-topic-item-meta">${escapeHtml(`${publishers} · ${subscribers}`)}</span>` +
             `</button>`
           );
         }).join('');
@@ -3729,7 +4024,20 @@
         : '<div class="info-topics-empty">Selecciona un topic para ver su stream en tiempo real.</div>';
 
       const headerTitle = selectedTopic || 'Topics';
-      const headerType = selectedType ? ` · ${selectedType}` : '';
+      const selectedPublishers = selectedCatalogItem && Number.isFinite(Number(selectedCatalogItem.publisher_count))
+        ? `pub=${Number(selectedCatalogItem.publisher_count)}`
+        : 'pub=n/a';
+      const selectedSubscribers = selectedCatalogItem && Number.isFinite(Number(selectedCatalogItem.subscriber_count))
+        ? `sub=${Number(selectedCatalogItem.subscriber_count)}`
+        : 'sub=n/a';
+      const selectedTopicMetaHtml = selectedTopic
+        ? (
+          `<div class="info-topics-selected-meta">` +
+            `${selectedType ? `<span class="info-topics-selected-badge">${escapeHtml(selectedType)}</span>` : ''}` +
+            `<span class="info-topics-selected-badge">${escapeHtml(`${selectedPublishers} · ${selectedSubscribers}`)}</span>` +
+          `</div>`
+        )
+        : '';
       const truncatedBanner = topicsState.truncated === true
         ? '<div class="info-error">Historial truncado por limites de memoria.</div>'
         : '';
@@ -3748,7 +4056,8 @@
           `</div>` +
           `<div class="info-topics-content">` +
             `<div class="info-topics-content-header">` +
-              `<div class="info-panel-status">${escapeHtml(headerTitle + headerType)}</div>` +
+              `<div class="info-panel-status">${escapeHtml(headerTitle)}</div>` +
+              `${selectedTopicMetaHtml}` +
               `<button id="infoTopicsCopyBtn" class="secondary info-topics-copy-btn" type="button"${copyDisabled ? ' disabled' : ''}>Copy</button>` +
             `</div>` +
             `<div class="info-topics-stream">${streamHtml}</div>` +
@@ -4244,6 +4553,9 @@
       if (payload && Array.isArray(payload.recent_events)) {
         setRecentEvents(payload.recent_events);
       }
+      if (payload && typeof payload.control_locked === 'boolean') {
+        syncControlLockFromServer(payload.control_locked, payload.control_lock_reason || '');
+      }
 
       const cmdVel = payload && payload.cmd_vel_safe ? payload.cmd_vel_safe : null;
       state.cmdVelSafe = cmdVel;
@@ -4344,18 +4656,22 @@
 
     function renderManualStatus() {
       const manual = state.manualControl || { enabled: false, linear_x_cmd: 0.0, angular_z_cmd: 0.0 };
-      const enabled = manual.enabled === true;
+      const disablePending = state.manualDisablePending === true;
+      const enabled = manual.enabled === true && !disablePending;
       const btn = document.getElementById('manualModeBtn');
-      btn.textContent = enabled ? 'ON' : 'OFF';
+      btn.textContent = disablePending ? '...' : (enabled ? 'ON' : 'OFF');
       btn.classList.toggle('manual-on', enabled);
-      btn.title = enabled ? 'modo manual (M) · ON' : 'modo manual (M) · OFF';
+      btn.title = disablePending
+        ? 'modo manual (M) · apagando'
+        : (enabled ? 'modo manual (M) · ON' : 'modo manual (M) · OFF');
       btn.setAttribute('aria-label', btn.title);
 
       const vx = Number(state.manualCmd.linearX || 0).toFixed(2);
       const wz = Number(state.manualCmd.angularZ || 0).toFixed(2);
       const status = document.getElementById('manualStatus');
-      status.textContent = `Manual: ${enabled ? 'ON' : 'OFF'} · keys=${manualKeysSummary()} · vx_cmd=${vx} · wz_cmd=${wz}`;
-      status.className = enabled ? 'status good' : 'status';
+      const manualStateLabel = disablePending ? 'DISABLING' : (enabled ? 'ON' : 'OFF');
+      status.textContent = `Manual: ${manualStateLabel} · keys=${manualKeysSummary()} · vx_cmd=${vx} · wz_cmd=${wz}`;
+      status.className = disablePending ? 'status warn' : (enabled ? 'status good' : 'status');
     }
 
     function stopManualLoop() {
@@ -4381,13 +4697,20 @@
       state.navTelemetry.navResultText = 'idle';
       state.navTelemetry.navResultEventId = 0;
       state.navTelemetry.initialized = false;
+      state.manualDisablePending = false;
+      stopControlHeartbeat();
+      state.controlLock.locked = true;
+      state.controlLock.reason = 'DISCONNECTED';
       state.alerts = [];
       state.recentEvents = [];
       renderAlerts();
       renderRecentEvents();
+      renderNavigationLockUi();
     }
 
     function sendManualCmd(linearX, angularZ, brakePct = 0) {
+      if (isControlLocked()) return;
+      if (state.manualDisablePending) return;
       if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
       const linear = Number(linearX || 0.0);
       const angular = Number(angularZ || 0.0);
@@ -4406,6 +4729,18 @@
     }
 
     function manualControlTick() {
+      if (isControlLocked()) {
+        stopManualLoop();
+        resetManualLocalState();
+        renderManualStatus();
+        return;
+      }
+      if (state.manualDisablePending) {
+        stopManualLoop();
+        resetManualLocalState();
+        renderManualStatus();
+        return;
+      }
       const hasControlIntent =
         state.manualBrakeHeld ||
         state.manualKeys.w ||
@@ -4456,8 +4791,16 @@
 
     function syncManualControlFromServer(manual) {
       if (!manual || typeof manual !== 'object') return;
+      const enabledFromServer = manual.enabled === true;
+      if (state.manualDisablePending && enabledFromServer) {
+        renderManualStatus();
+        return;
+      }
+      if (!enabledFromServer) {
+        state.manualDisablePending = false;
+      }
       state.manualControl = {
-        enabled: manual.enabled === true,
+        enabled: enabledFromServer,
         linear_x_cmd: Number(manual.linear_x_cmd || 0.0),
         angular_z_cmd: Number(manual.angular_z_cmd || 0.0),
         last_cmd_age_s: manual.last_cmd_age_s == null ? null : Number(manual.last_cmd_age_s)
@@ -4466,7 +4809,7 @@
       if (!state.manualControl.enabled) {
         stopManualLoop();
         resetManualLocalState();
-        if (state.pendingGoalAfterManualOff) {
+        if (state.pendingGoalAfterManualOff && !isControlLocked()) {
           const goalRequest = state.pendingGoalAfterManualOff;
           state.pendingGoalAfterManualOff = null;
           send(goalRequest);
@@ -4494,6 +4837,16 @@
     function send(payload, options = {}) {
       const outbound = Object.assign({}, payload || {});
       const op = String(outbound.op || '');
+      const blockedByLock =
+        isControlLocked() && (
+          op === 'set_goal_ll' ||
+          op === 'set_manual_cmd' ||
+          (op === 'set_manual_mode' && outbound.enabled === true)
+        );
+      if (blockedByLock) {
+        setStatus(formatControlLockReason(state.controlLock.reason), false);
+        return null;
+      }
       if (CAMERA_OPS.has(op) && !getEffectiveConnectionConfig().cameraEnabled) {
         updateCameraStatusUi({ ok: false, error: CAMERA_DISABLED_SIM_ERROR, last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
         setStatus('Camera disabled in simulation mode', false);
@@ -4693,6 +5046,7 @@
         state.ws.close();
       }
       clearAllPendingRequests();
+      stopControlHeartbeat();
       stopManualLoop();
       resetManualLocalState();
       resetNavTelemetryState();
@@ -4715,9 +5069,12 @@
         const maskReady = msg.mask_ready === true;
         const maskReadyText = maskReady ? 'mask ready' : 'mask not ready';
         setStatus(`state updated (${maskReadyText}, source=${maskSource})`, maskReady);
+        syncControlLockFromServer(msg.control_locked === true, msg.control_lock_reason || '');
         updateNavTelemetry({
           cmd_vel_safe: msg.cmd_vel_safe,
           goal_active: msg.goal_active,
+          control_locked: msg.control_locked,
+          control_lock_reason: msg.control_lock_reason,
           nav_result_status: msg.nav_result_status,
           nav_result_text: msg.nav_result_text,
           nav_result_event_id: msg.nav_result_event_id,
@@ -4744,7 +5101,9 @@
       }
 
       if (msg.op === 'nav_event') {
-        pushRecentEvent(msg.event || null);
+        const eventPayload = msg.event || null;
+        pushRecentEvent(eventPayload);
+        syncControlLockFromNavEvent(eventPayload);
         return;
       }
 
@@ -4840,6 +5199,7 @@
         } else if (msg.request === 'set_manual_mode') {
           if (msg.ok) {
             const enabled = msg.enabled === true;
+            state.manualDisablePending = false;
             state.manualControl.enabled = enabled;
             if (enabled) {
               goalStatusEl.textContent = 'Manual control enabled';
@@ -4860,6 +5220,14 @@
             }
             renderManualStatus();
           } else {
+            const wasDisablePending = state.manualDisablePending === true;
+            state.manualDisablePending = false;
+            if (wasDisablePending) {
+              state.manualControl.enabled = true;
+              if (!state.manualLoopTimer) {
+                startManualLoop();
+              }
+            }
             if (state.pendingGoalAfterManualOff) {
               state.pendingGoalAfterManualOff = null;
               goalStatusEl.textContent = `Cannot send goals: failed to disable manual mode (${msg.error || 'error'})`;
@@ -4867,6 +5235,30 @@
               goalStatusEl.textContent = `Manual mode failed: ${msg.error || 'error'}`;
             }
             goalStatusEl.className = 'status bad';
+            renderManualStatus();
+          }
+        } else if (msg.request === 'set_control_lock') {
+          const lockedAfter = msg.control_locked === true || msg.locked === true;
+          syncControlLockFromServer(
+            lockedAfter,
+            msg.control_lock_reason || '',
+            {
+              overrideGrace: true,
+              startUnlockGrace: msg.ok && !lockedAfter
+            }
+          );
+          if (msg.ok) {
+            goalStatusEl.textContent = lockedAfter
+              ? formatControlLockReason(state.controlLock.reason)
+              : 'Control unlocked';
+            goalStatusEl.className = lockedAfter ? 'status bad' : 'status good';
+          } else {
+            goalStatusEl.textContent = `Unlock failed: ${msg.error || 'error'}`;
+            goalStatusEl.className = 'status bad';
+          }
+        } else if (msg.request === 'control_heartbeat') {
+          if (msg.control_locked === true || msg.locked === true) {
+            syncControlLockFromServer(true, msg.control_lock_reason || 'UI_HEARTBEAT_TIMEOUT');
           }
         } else if (msg.request === 'set_manual_cmd') {
           if (!msg.ok) {
@@ -5627,6 +6019,10 @@
       send({ op: 'cancel_goal' });
     });
 
+    document.getElementById('unlockControlBtn').addEventListener('click', () => {
+      send({ op: 'set_control_lock', locked: false });
+    });
+
     document.getElementById('manualModeBtn').addEventListener('click', () => {
       toggleManualModeRequest();
     });
@@ -5641,6 +6037,10 @@
       const code = event.code;
       const key = event.key;
       const isEscape = code === 'Escape' || key === 'Escape';
+      const isPlainInfoShortcut = !event.ctrlKey
+        && !event.metaKey
+        && !event.altKey
+        && (code === 'KeyI' || key === 'i' || key === 'I');
       const snapshotModal = document.getElementById('snapshotModal');
       const menuModal = document.getElementById('menuModal');
       const infoModal = document.getElementById('infoModal');
@@ -5679,6 +6079,14 @@
       }
 
       if (isTextInputFocused()) return;
+
+      if (isPlainInfoShortcut) {
+        event.preventDefault();
+        if (!state.sensorInfo.open) {
+          openInfoModal();
+        }
+        return;
+      }
 
       if (isMapToolActive()) {
         if (code === 'Backspace') {
@@ -5745,6 +6153,12 @@
         code === 'KeyA' ||
         code === 'KeyS' ||
         code === 'KeyD';
+      const isControlKeyShortcut = code === 'KeyM' || code === 'KeyF';
+      if (isControlLocked() && (isManualKey || isControlKeyShortcut)) {
+        event.preventDefault();
+        setStatus(formatControlLockReason(state.controlLock.reason), false);
+        return;
+      }
       if (!isManualKey) return;
 
       event.preventDefault();
@@ -5773,6 +6187,7 @@
     });
 
     window.addEventListener('beforeunload', () => {
+      stopControlHeartbeat();
       if (state.ws && state.ws.readyState === WebSocket.OPEN && state.manualControl.enabled) {
         state.ws.send(JSON.stringify({ op: 'set_manual_mode', enabled: false }));
       }
@@ -5874,6 +6289,7 @@
     renderRecentEvents();
     renderRosbagUi();
     renderZoneList({ zones: state.lastZones });
+    renderNavigationLockUi();
     updateGoalButtonsState();
     updateWaypointStatus();
     renderGoalWaypoints();

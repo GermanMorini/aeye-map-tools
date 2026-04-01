@@ -9,6 +9,8 @@ def generate_launch_description():
     ws_host = LaunchConfiguration("ws_host")
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
+    odom_topic = LaunchConfiguration("odom_topic")
+    robot_heading_topic = LaunchConfiguration("robot_heading_topic")
     map_frame = LaunchConfiguration("map_frame")
     launch_zones_manager = LaunchConfiguration("launch_zones_manager")
     launch_nav_command_server = LaunchConfiguration("launch_nav_command_server")
@@ -23,6 +25,10 @@ def generate_launch_description():
     nav_cancel_goal_service = LaunchConfiguration("nav_cancel_goal_service")
     nav_brake_service = LaunchConfiguration("nav_brake_service")
     nav_set_manual_mode_service = LaunchConfiguration("nav_set_manual_mode_service")
+    nav_set_control_lock_service = LaunchConfiguration("nav_set_control_lock_service")
+    nav_touch_control_heartbeat_service = LaunchConfiguration(
+        "nav_touch_control_heartbeat_service"
+    )
     nav_set_datum_service = LaunchConfiguration("nav_set_datum_service")
     nav_get_state_service = LaunchConfiguration("nav_get_state_service")
     teleop_cmd_topic = LaunchConfiguration("teleop_cmd_topic")
@@ -51,6 +57,10 @@ def generate_launch_description():
             DeclareLaunchArgument("ws_host", default_value="0.0.0.0"),
             DeclareLaunchArgument("ws_port", default_value="8766"),
             DeclareLaunchArgument("gps_topic", default_value="/gps/fix"),
+            DeclareLaunchArgument("odom_topic", default_value="/odometry/filtered"),
+            DeclareLaunchArgument(
+                "robot_heading_topic", default_value="/odometry/local"
+            ),
             DeclareLaunchArgument("map_frame", default_value="map"),
             DeclareLaunchArgument("launch_zones_manager", default_value="true"),
             DeclareLaunchArgument("launch_nav_command_server", default_value="true"),
@@ -79,6 +89,14 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "nav_set_manual_mode_service",
                 default_value="/nav_command_server/set_manual_mode",
+            ),
+            DeclareLaunchArgument(
+                "nav_set_control_lock_service",
+                default_value="/nav_command_server/set_control_lock",
+            ),
+            DeclareLaunchArgument(
+                "nav_touch_control_heartbeat_service",
+                default_value="/nav_command_server/touch_control_heartbeat",
             ),
             DeclareLaunchArgument(
                 "nav_set_datum_service",
@@ -123,7 +141,7 @@ def generate_launch_description():
                 default_value="/datum_setter/get_datum",
             ),
             DeclareLaunchArgument("request_timeout_s", default_value="5.0"),
-            DeclareLaunchArgument("snapshot_request_timeout_s", default_value="2.0"),
+            DeclareLaunchArgument("snapshot_request_timeout_s", default_value="5.0"),
             DeclareLaunchArgument("set_zones_timeout_s", default_value="12.0"),
             DeclareLaunchArgument("set_goal_timeout_s", default_value="12.0"),
             Node(
@@ -159,6 +177,8 @@ def generate_launch_description():
                         "cancel_goal_service": nav_cancel_goal_service,
                         "brake_service": nav_brake_service,
                         "set_manual_mode_service": nav_set_manual_mode_service,
+                        "set_control_lock_service": nav_set_control_lock_service,
+                        "touch_control_heartbeat_service": nav_touch_control_heartbeat_service,
                         "get_state_service": nav_get_state_service,
                     }
                 ],
@@ -185,6 +205,8 @@ def generate_launch_description():
                         "ws_host": ws_host,
                         "ws_port": ws_port,
                         "gps_topic": gps_topic,
+                        "odom_topic": odom_topic,
+                        "robot_heading_topic": robot_heading_topic,
                         "map_frame": map_frame,
                         "zones_set_geojson_service": zones_set_geojson_service,
                         "zones_get_state_service": zones_get_state_service,
@@ -193,6 +215,8 @@ def generate_launch_description():
                         "nav_cancel_goal_service": nav_cancel_goal_service,
                         "nav_brake_service": nav_brake_service,
                         "nav_set_manual_mode_service": nav_set_manual_mode_service,
+                        "nav_set_control_lock_service": nav_set_control_lock_service,
+                        "nav_touch_control_heartbeat_service": nav_touch_control_heartbeat_service,
                         "nav_set_datum_service": nav_set_datum_service,
                         "nav_get_state_service": nav_get_state_service,
                         "teleop_cmd_topic": teleop_cmd_topic,
