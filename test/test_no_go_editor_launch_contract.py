@@ -30,7 +30,7 @@ def test_no_go_editor_launch_exposes_sensor_info_topics_for_web_gateway() -> Non
     assert 'DeclareLaunchArgument("odom_topic", default_value="/odometry/filtered")' in launch_contents
     assert (
         'DeclareLaunchArgument(\n'
-        '                "robot_heading_topic", default_value="/odometry/local"\n'
+        '                "robot_heading_topic", default_value="/odometry/global"\n'
         "            )"
     ) in launch_contents
     assert 'DeclareLaunchArgument("imu_topic", default_value="/imu/data")' in launch_contents

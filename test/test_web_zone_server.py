@@ -284,7 +284,7 @@ def test_sensor_info_fix_quality_and_precision_mapping_matches_contract() -> Non
     assert _estimated_precision_for_fix(2) is None
 
 
-def test_robot_heading_updates_robot_pose_heading_from_odometry_local() -> None:
+def test_robot_heading_updates_robot_pose_heading_from_odometry_global() -> None:
     node = _FakeNode()
     node._lock = threading.Lock()
     node._last_robot_heading_deg = None

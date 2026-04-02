@@ -59,7 +59,7 @@ def generate_launch_description():
             DeclareLaunchArgument("gps_topic", default_value="/gps/fix"),
             DeclareLaunchArgument("odom_topic", default_value="/odometry/filtered"),
             DeclareLaunchArgument(
-                "robot_heading_topic", default_value="/odometry/local"
+                "robot_heading_topic", default_value="/odometry/global"
             ),
             DeclareLaunchArgument("map_frame", default_value="map"),
             DeclareLaunchArgument("launch_zones_manager", default_value="true"),

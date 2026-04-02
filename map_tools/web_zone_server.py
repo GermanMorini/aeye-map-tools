@@ -826,7 +826,7 @@ class WebZoneServerNode(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("odom_topic", "/odometry/filtered")
-        self.declare_parameter("robot_heading_topic", "/odometry/local")
+        self.declare_parameter("robot_heading_topic", "/odometry/global")
         self.declare_parameter("gps_broadcast_hz", 1.0)
         self.declare_parameter("request_timeout_s", 5.0)
         self.declare_parameter("snapshot_request_timeout_s", 5.0)
