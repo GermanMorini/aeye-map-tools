@@ -12,6 +12,8 @@ def generate_launch_description():
     odom_topic = LaunchConfiguration("odom_topic")
     robot_heading_topic = LaunchConfiguration("robot_heading_topic")
     map_frame = LaunchConfiguration("map_frame")
+    project_odom_to_geodetic = LaunchConfiguration("project_odom_to_geodetic")
+    reload_zones_on_connect = LaunchConfiguration("reload_zones_on_connect")
     launch_zones_manager = LaunchConfiguration("launch_zones_manager")
     launch_nav_command_server = LaunchConfiguration("launch_nav_command_server")
     launch_nav_snapshot_server = LaunchConfiguration("launch_nav_snapshot_server")
@@ -30,6 +32,7 @@ def generate_launch_description():
         "nav_touch_control_heartbeat_service"
     )
     nav_set_datum_service = LaunchConfiguration("nav_set_datum_service")
+    nav_get_datum_service = LaunchConfiguration("nav_get_datum_service")
     nav_get_state_service = LaunchConfiguration("nav_get_state_service")
     teleop_cmd_topic = LaunchConfiguration("teleop_cmd_topic")
 
@@ -45,7 +48,6 @@ def generate_launch_description():
     rtcm_count_topic = LaunchConfiguration("rtcm_count_topic")
     gps_raw_topic = LaunchConfiguration("gps_raw_topic")
     rtk_source_status_topic = LaunchConfiguration("rtk_source_status_topic")
-    nav_get_datum_service = LaunchConfiguration("nav_get_datum_service")
 
     request_timeout_s = LaunchConfiguration("request_timeout_s")
     snapshot_request_timeout_s = LaunchConfiguration("snapshot_request_timeout_s")
@@ -57,11 +59,13 @@ def generate_launch_description():
             DeclareLaunchArgument("ws_host", default_value="0.0.0.0"),
             DeclareLaunchArgument("ws_port", default_value="8766"),
             DeclareLaunchArgument("gps_topic", default_value="/gps/fix"),
-            DeclareLaunchArgument("odom_topic", default_value="/odometry/filtered"),
+            DeclareLaunchArgument("odom_topic", default_value="/odometry/local"),
             DeclareLaunchArgument(
                 "robot_heading_topic", default_value="/odometry/global"
             ),
             DeclareLaunchArgument("map_frame", default_value="map"),
+            DeclareLaunchArgument("project_odom_to_geodetic", default_value="false"),
+            DeclareLaunchArgument("reload_zones_on_connect", default_value="true"),
             DeclareLaunchArgument("launch_zones_manager", default_value="true"),
             DeclareLaunchArgument("launch_nav_command_server", default_value="true"),
             DeclareLaunchArgument("launch_nav_snapshot_server", default_value="true"),
@@ -103,6 +107,10 @@ def generate_launch_description():
                 default_value="/datum_setter/set_datum",
             ),
             DeclareLaunchArgument(
+                "nav_get_datum_service",
+                default_value="/datum_setter/get_datum",
+            ),
+            DeclareLaunchArgument(
                 "teleop_cmd_topic",
                 default_value="/cmd_vel_teleop",
             ),
@@ -135,10 +143,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "rtk_source_status_topic",
                 default_value="/gps/rtk_source/status_json",
-            ),
-            DeclareLaunchArgument(
-                "nav_get_datum_service",
-                default_value="/datum_setter/get_datum",
             ),
             DeclareLaunchArgument("request_timeout_s", default_value="5.0"),
             DeclareLaunchArgument("snapshot_request_timeout_s", default_value="5.0"),
@@ -208,6 +212,8 @@ def generate_launch_description():
                         "odom_topic": odom_topic,
                         "robot_heading_topic": robot_heading_topic,
                         "map_frame": map_frame,
+                        "project_odom_to_geodetic": project_odom_to_geodetic,
+                        "reload_zones_on_connect": reload_zones_on_connect,
                         "zones_set_geojson_service": zones_set_geojson_service,
                         "zones_get_state_service": zones_get_state_service,
                         "zones_reload_service": zones_reload_service,
@@ -218,6 +224,7 @@ def generate_launch_description():
                         "nav_set_control_lock_service": nav_set_control_lock_service,
                         "nav_touch_control_heartbeat_service": nav_touch_control_heartbeat_service,
                         "nav_set_datum_service": nav_set_datum_service,
+                        "nav_get_datum_service": nav_get_datum_service,
                         "nav_get_state_service": nav_get_state_service,
                         "teleop_cmd_topic": teleop_cmd_topic,
                         "nav_snapshot_service": nav_snapshot_service,
@@ -232,7 +239,6 @@ def generate_launch_description():
                         "rtcm_count_topic": rtcm_count_topic,
                         "gps_raw_topic": gps_raw_topic,
                         "rtk_source_status_topic": rtk_source_status_topic,
-                        "nav_get_datum_service": nav_get_datum_service,
                         "request_timeout_s": request_timeout_s,
                         "snapshot_request_timeout_s": snapshot_request_timeout_s,
                         "set_zones_timeout_s": set_zones_timeout_s,

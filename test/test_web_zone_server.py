@@ -24,7 +24,12 @@ class _FakeNode:
     _should_surface_diagnostic = WebZoneServerNode._should_surface_diagnostic
     _rosbag_topics_for_profile = staticmethod(WebZoneServerNode._rosbag_topics_for_profile)
     _yaw_deg_from_quaternion = WebZoneServerNode._yaw_deg_from_quaternion
+    _build_robot_pose = WebZoneServerNode._build_robot_pose
+    _should_project_odom_pose_locked = WebZoneServerNode._should_project_odom_pose_locked
     _on_robot_heading_odom = WebZoneServerNode._on_robot_heading_odom
+
+    def _project_map_xy_to_ll_via_service(self, *_args, **_kwargs):
+        return None
 
 
 class _FakeStatus:
@@ -222,10 +227,14 @@ class _FakeSetDatumNode:
         self.request_timeout_s = 5.0
         self._response = response
         self.last_request = None
+        self.refresh_calls = 0
 
     def _call_service(self, _client, request, _timeout_s):
         self.last_request = request
         return self._response
+
+    def _refresh_datum_from_service(self) -> None:
+        self.refresh_calls += 1
 
 
 def test_set_datum_current_sends_empty_coords_and_propagates_success() -> None:
@@ -243,6 +252,7 @@ def test_set_datum_current_sends_empty_coords_and_propagates_success() -> None:
         assert "Datum set successfully." in err
         assert isinstance(node.last_request, _FakeSetDatumRequest)
         assert node.last_request.coords == []
+        assert node.refresh_calls == 1
     finally:
         WebZoneServerNode.set_datum_current.__globals__["SetDatum"] = original
 
@@ -287,7 +297,11 @@ def test_sensor_info_fix_quality_and_precision_mapping_matches_contract() -> Non
 def test_robot_heading_updates_robot_pose_heading_from_odometry_global() -> None:
     node = _FakeNode()
     node._lock = threading.Lock()
+    node.project_odom_to_geodetic = False
+    node.gps_broadcast_hz = 1.0
+    node.map_frame = "map"
     node._last_robot_heading_deg = None
+    node._last_gps_broadcast_monotonic = None
     node._last_robot_pose = {"lat": -31.0, "lon": -64.0}
 
     msg = Odometry()
@@ -461,3 +475,96 @@ def test_sensor_info_topics_session_creates_single_dynamic_subscription_per_sele
     assert subs_after_switch == 1
     assert len(node.destroyed) >= 1
     assert any(item[-1] is True for item in node.created)
+
+class _FakeProjectionModeNode:
+    _should_project_odom_pose_locked = WebZoneServerNode._should_project_odom_pose_locked
+
+    def __init__(self, enabled: bool, datum_lat=None, datum_lon=None) -> None:
+        self.project_odom_to_geodetic = enabled
+        self._datum_lat = datum_lat
+        self._datum_lon = datum_lon
+
+
+def test_project_odom_mode_depends_on_flag_not_cached_datum() -> None:
+    enabled_without_datum = _FakeProjectionModeNode(True)
+    disabled_with_datum = _FakeProjectionModeNode(True, -31.48, -64.24)
+
+    assert enabled_without_datum._should_project_odom_pose_locked() is True
+    assert disabled_with_datum._should_project_odom_pose_locked() is True
+    assert _FakeProjectionModeNode(False, -31.48, -64.24)._should_project_odom_pose_locked() is False
+
+
+class _FakeGoalClientNode:
+    set_nav_goals = WebZoneServerNode.set_nav_goals
+    _normalize_yaw_deg = staticmethod(WebZoneServerNode._normalize_yaw_deg)
+
+    def __init__(self, response) -> None:
+        self.set_goal_timeout_s = 8.0
+        self._response = response
+        self._nav_set_goal_client = object()
+        self.last_request = None
+        self.logged = []
+
+    def _call_service(self, _client, request, _timeout_s):
+        self.last_request = request
+        return self._response
+
+    def get_logger(self):
+        class _Logger:
+            def __init__(self, sink):
+                self._sink = sink
+
+            def info(self, msg: str) -> None:
+                self._sink.append(("info", msg))
+
+            def warning(self, msg: str) -> None:
+                self._sink.append(("warning", msg))
+
+        return _Logger(self.logged)
+
+
+def test_set_nav_goals_single_waypoint_uses_scalar_request_fields() -> None:
+    response = type("Res", (), {"ok": True, "error": ""})()
+    node = _FakeGoalClientNode(response=response)
+
+    ok, err, count, loop_used = node.set_nav_goals(
+        [{"lat": -31.48, "lon": -64.24, "yaw_deg": 360.0}],
+        loop=True,
+    )
+
+    assert ok is True
+    assert err == ""
+    assert count == 1
+    assert loop_used is False
+    assert list(node.last_request.lats) == []
+    assert list(node.last_request.lons) == []
+    assert list(node.last_request.yaws_deg) == []
+    assert node.last_request.lat == -31.48
+    assert node.last_request.lon == -64.24
+    assert node.last_request.yaw_deg == 0.0
+    assert node.last_request.loop is False
+
+
+def test_set_nav_goals_multi_waypoint_uses_array_request_fields() -> None:
+    response = type("Res", (), {"ok": True, "error": ""})()
+    node = _FakeGoalClientNode(response=response)
+
+    ok, err, count, loop_used = node.set_nav_goals(
+        [
+            {"lat": -31.48, "lon": -64.24, "yaw_deg": 0.0},
+            {"lat": -31.49, "lon": -64.23, "yaw_deg": 190.0},
+        ],
+        loop=True,
+    )
+
+    assert ok is True
+    assert err == ""
+    assert count == 2
+    assert loop_used is True
+    assert list(node.last_request.lats) == [-31.48, -31.49]
+    assert list(node.last_request.lons) == [-64.24, -64.23]
+    assert list(node.last_request.yaws_deg) == [0.0, -170.0]
+    assert node.last_request.lat == -31.48
+    assert node.last_request.lon == -64.24
+    assert node.last_request.yaw_deg == 0.0
+    assert node.last_request.loop is True

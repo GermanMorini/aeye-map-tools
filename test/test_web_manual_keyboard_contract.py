@@ -137,3 +137,40 @@ def test_waypoint_yaw_uses_local_north_east_meters_instead_of_raw_degree_deltas(
     assert "const metersPerDegLon = metersPerDegLat * Math.max(1.0e-6, Math.abs(Math.cos(refLat * Math.PI / 180.0)));" in contents
     assert "const eastM = (Number(target.lng) - Number(origin.lng)) * metersPerDegLon;" in contents
     assert "const northM = (Number(target.lat) - Number(origin.lat)) * metersPerDegLat;" in contents
+
+def test_web_index_supports_connection_overrides_from_query_string() -> None:
+    index_path = Path(__file__).resolve().parents[1] / "web" / "index.html"
+    contents = index_path.read_text(encoding="utf-8")
+
+    assert "function readConnectionQueryOverrides()" in contents
+    assert "new URLSearchParams(window.location.search || '')" in contents
+    assert "params.get('preset')" in contents
+    assert "params.get('host')" in contents
+    assert "params.get('port')" in contents
+    assert "params.get('autoconnect')" in contents
+    assert "autostartConnect: false" in contents
+    assert "state.autostartConnect = queryConnection.autoconnect === true;" in contents
+    assert "if (state.autostartConnect) {" in contents
+    assert "connectWs();" in contents
+
+
+def test_web_index_constrains_goal_spacing_and_heading() -> None:
+    index_path = Path(__file__).resolve().parents[1] / "web" / "index.html"
+    contents = index_path.read_text(encoding="utf-8")
+
+    assert 'id="goalLoop" type="checkbox" style="width:auto;"' in contents
+    assert 'id="goalMinSpacing"' in contents
+    assert 'id="manualLinearSlider" type="range" min="1.2"' in contents
+    assert "const goalRequest = (payloadWaypoints.length === 1)" in contents
+    assert "lat: Number(payloadWaypoints[0].lat)" in contents
+    assert "yaw_deg: Number(payloadWaypoints[0].yaw_deg || 0.0)" in contents
+    assert "const DEFAULT_GOAL_MIN_SPACING_M = 6.0;" in contents
+    assert "const MAX_GOAL_YAW_DELTA_FROM_ROUTE_DEG = 85.0;" in contents
+    assert "const MAX_GOAL_TURNAROUND_DELTA_DEG = 135.0;" in contents
+    assert "function clampYawAroundReference" in contents
+    assert "function preventFullTurnGoalYaw(rawYawDeg, routeYawDeg)" in contents
+    assert "if (yawDeltaDeg >= MAX_GOAL_TURNAROUND_DELTA_DEG) {" in contents
+    assert "function buildConstrainedGoalWaypoints(rawWaypoints)" in contents
+    assert "state.goalWaypoints = buildConstrainedGoalWaypoints(state.goalWaypoints);" in contents
+    assert "document.getElementById('goalMinSpacing').addEventListener('change'" in contents
+    assert "sin giros 360 y gap minimo" in contents

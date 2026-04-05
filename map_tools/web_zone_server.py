@@ -21,6 +21,7 @@ from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import TwistStamped
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from nav_msgs.msg import Odometry
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -55,6 +56,7 @@ from interfaces.srv import (
     SetZonesGeoJson,
     TouchControlHeartbeat,
 )
+from robot_localization.srv import ToLL
 from .waypoints_file_utils import load_waypoints_yaml_file, save_waypoints_yaml_file
 
 
@@ -825,8 +827,10 @@ class WebZoneServerNode(Node):
         self.declare_parameter("ws_port", 8766)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("gps_topic", "/gps/fix")
-        self.declare_parameter("odom_topic", "/odometry/filtered")
+        self.declare_parameter("odom_topic", "/odometry/local")
         self.declare_parameter("robot_heading_topic", "/odometry/global")
+        self.declare_parameter("project_odom_to_geodetic", False)
+        self.declare_parameter("reload_zones_on_connect", True)
         self.declare_parameter("gps_broadcast_hz", 1.0)
         self.declare_parameter("request_timeout_s", 5.0)
         self.declare_parameter("snapshot_request_timeout_s", 5.0)
@@ -848,6 +852,7 @@ class WebZoneServerNode(Node):
             "/nav_command_server/touch_control_heartbeat",
         )
         self.declare_parameter("nav_set_datum_service", "/datum_setter/set_datum")
+        self.declare_parameter("nav_get_datum_service", "/datum_setter/get_datum")
         self.declare_parameter("nav_get_state_service", "/nav_command_server/get_state")
         self.declare_parameter("teleop_cmd_topic", "/cmd_vel_teleop")
 
@@ -875,6 +880,12 @@ class WebZoneServerNode(Node):
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.odom_topic = str(self.get_parameter("odom_topic").value)
         self.robot_heading_topic = str(self.get_parameter("robot_heading_topic").value)
+        self.project_odom_to_geodetic = bool(
+            self.get_parameter("project_odom_to_geodetic").value
+        )
+        self.reload_zones_on_connect = bool(
+            self.get_parameter("reload_zones_on_connect").value
+        )
         self.gps_broadcast_hz = float(self.get_parameter("gps_broadcast_hz").value)
         self.request_timeout_s = max(0.5, float(self.get_parameter("request_timeout_s").value))
         self.snapshot_request_timeout_s = max(
@@ -912,6 +923,7 @@ class WebZoneServerNode(Node):
             self.get_parameter("nav_touch_control_heartbeat_service").value
         )
         self.nav_set_datum_service = str(self.get_parameter("nav_set_datum_service").value)
+        self.nav_get_datum_service = str(self.get_parameter("nav_get_datum_service").value)
         self.nav_get_state_service = str(self.get_parameter("nav_get_state_service").value)
         self.teleop_cmd_topic = str(self.get_parameter("teleop_cmd_topic").value)
 
@@ -943,10 +955,13 @@ class WebZoneServerNode(Node):
         self._ws_clients: Set[Any] = set()
         self._ws_send_locks: Dict[Any, asyncio.Lock] = {}
         self._sensor_info_sessions: Dict[Any, SensorInfoSession] = {}
+        self._service_client_group = ReentrantCallbackGroup()
 
         self._last_robot_pose: Optional[Dict[str, float]] = None
         self._last_robot_heading_deg: Optional[float] = None
         self._last_gps_broadcast_monotonic: Optional[float] = None
+        self._datum_lat: Optional[float] = None
+        self._datum_lon: Optional[float] = None
 
         self._zones: List[Dict[str, Any]] = []
         self._zones_geojson: Dict[str, Any] = {"type": "FeatureCollection", "features": []}
@@ -1008,19 +1023,33 @@ class WebZoneServerNode(Node):
         )
 
         self._zones_set_geojson_client = self.create_client(
-            SetZonesGeoJson, self.zones_set_geojson_service
+            SetZonesGeoJson,
+            self.zones_set_geojson_service,
+            callback_group=self._service_client_group,
         )
         self._zones_get_state_client = self.create_client(
-            GetZonesState, self.zones_get_state_service
+            GetZonesState,
+            self.zones_get_state_service,
+            callback_group=self._service_client_group,
         )
-        self._zones_reload_client = self.create_client(Trigger, self.zones_reload_service)
-        self._nav_set_goal_client = self.create_client(SetNavGoalLL, self.nav_set_goal_service)
+        self._zones_reload_client = self.create_client(
+            Trigger, self.zones_reload_service, callback_group=self._service_client_group
+        )
+        self._nav_set_goal_client = self.create_client(
+            SetNavGoalLL, self.nav_set_goal_service, callback_group=self._service_client_group
+        )
         self._nav_cancel_goal_client = self.create_client(
-            CancelNavGoal, self.nav_cancel_goal_service
+            CancelNavGoal,
+            self.nav_cancel_goal_service,
+            callback_group=self._service_client_group,
         )
-        self._nav_brake_client = self.create_client(BrakeNav, self.nav_brake_service)
+        self._nav_brake_client = self.create_client(
+            BrakeNav, self.nav_brake_service, callback_group=self._service_client_group
+        )
         self._nav_set_manual_mode_client = self.create_client(
-            SetManualMode, self.nav_set_manual_mode_service
+            SetManualMode,
+            self.nav_set_manual_mode_service,
+            callback_group=self._service_client_group,
         )
         self._nav_set_control_lock_client = self.create_client(
             SetControlLock, self.nav_set_control_lock_service
@@ -1029,26 +1058,46 @@ class WebZoneServerNode(Node):
             TouchControlHeartbeat, self.nav_touch_control_heartbeat_service
         )
         self._nav_set_datum_client = self.create_client(
-            SetDatum, self.nav_set_datum_service
+            SetDatum,
+            self.nav_set_datum_service,
+            callback_group=self._service_client_group,
         )
         self._nav_get_datum_client = self.create_client(
-            GetDatum, self.nav_get_datum_service
+            GetDatum,
+            self.nav_get_datum_service,
+            callback_group=self._service_client_group,
+        )
+        self._nav_to_ll_client = self.create_client(
+            ToLL, "/toLL", callback_group=self._service_client_group
         )
         self._teleop_cmd_pub = self.create_publisher(CmdVelFinal, self.teleop_cmd_topic, 10)
-        self._nav_get_state_client = self.create_client(GetNavState, self.nav_get_state_service)
-        self._nav_snapshot_client = self.create_client(GetNavSnapshot, self.nav_snapshot_service)
-        self._camera_pan_client = self.create_client(CameraPan, self.camera_pan_service)
+        self._nav_get_state_client = self.create_client(
+            GetNavState, self.nav_get_state_service, callback_group=self._service_client_group
+        )
+        self._nav_snapshot_client = self.create_client(
+            GetNavSnapshot, self.nav_snapshot_service, callback_group=self._service_client_group
+        )
+        self._camera_pan_client = self.create_client(
+            CameraPan, self.camera_pan_service, callback_group=self._service_client_group
+        )
         self._camera_zoom_toggle_client = self.create_client(
-            Trigger, self.camera_zoom_toggle_service
+            Trigger,
+            self.camera_zoom_toggle_service,
+            callback_group=self._service_client_group,
         )
         self._camera_status_client = self.create_client(
-            CameraStatus, self.camera_status_service
+            CameraStatus,
+            self.camera_status_service,
+            callback_group=self._service_client_group,
         )
         self.get_logger().info(
             "Web gateway ready "
             f"(ws={self.ws_host}:{self.ws_port}, zones_set={self.zones_set_geojson_service}, "
             f"goal_set={self.nav_set_goal_service}, snapshot={self.nav_snapshot_service}, "
             f"set_datum={self.nav_set_datum_service}, "
+            f"set_control_lock={self.nav_set_control_lock_service}, "
+            f"touch_control_heartbeat={self.nav_touch_control_heartbeat_service}, "
+            f"get_datum={self.nav_get_datum_service}, "
             f"set_control_lock={self.nav_set_control_lock_service}, "
             f"touch_control_heartbeat={self.nav_touch_control_heartbeat_service}, "
             f"nav_events={self.nav_events_topic}, diagnostics={self.diagnostics_topic}, "
@@ -1058,9 +1107,13 @@ class WebZoneServerNode(Node):
             f"get_datum={self.nav_get_datum_service}, "
             f"teleop_topic={self.teleop_cmd_topic}, gps_topic={self.gps_topic}, "
             f"odom_topic={self.odom_topic}, "
-            f"robot_heading_topic={self.robot_heading_topic})"
+            f"robot_heading_topic={self.robot_heading_topic}, "
+            f"project_odom_to_geodetic={self.project_odom_to_geodetic}, "
+            f"reload_zones_on_connect={self.reload_zones_on_connect})"
         )
         self.get_logger().info(f"Waypoints file path: {self.waypoints_file}")
+        if self.project_odom_to_geodetic:
+            self.create_timer(1.0, self._refresh_datum_from_service)
 
     def add_client(self, ws: Any) -> None:
         with self._lock:
@@ -1583,6 +1636,8 @@ class WebZoneServerNode(Node):
             return
 
         with self._lock:
+            if self._should_project_odom_pose_locked():
+                return
             heading_deg = self._last_robot_heading_deg
         pose = self._build_robot_pose(
             lat=float(msg.latitude),
@@ -1638,6 +1693,53 @@ class WebZoneServerNode(Node):
             pose["heading_deg"] = float(heading_deg)
         return pose
 
+    def _should_project_odom_pose_locked(self) -> bool:
+        return bool(self.project_odom_to_geodetic)
+
+    def _project_map_xy_to_ll_via_service(
+        self, x_map_m: float, y_map_m: float, z_map_m: float = 0.0
+    ) -> Optional[Tuple[float, float]]:
+        if (
+            (not np.isfinite(x_map_m))
+            or (not np.isfinite(y_map_m))
+            or (not np.isfinite(z_map_m))
+        ):
+            return None
+        req = ToLL.Request()
+        req.map_point.x = float(x_map_m)
+        req.map_point.y = float(y_map_m)
+        req.map_point.z = float(z_map_m)
+        res = self._call_service(
+            self._nav_to_ll_client, req, min(self.request_timeout_s, 1.0)
+        )
+        if res is None:
+            return None
+        lat = float(getattr(res.ll_point, "latitude", float("nan")))
+        lon = float(getattr(res.ll_point, "longitude", float("nan")))
+        if (not np.isfinite(lat)) or (not np.isfinite(lon)):
+            return None
+        return lat, lon
+
+    def _refresh_datum_from_service(self) -> None:
+        if not self.project_odom_to_geodetic:
+            return
+        if not self._nav_get_datum_client.wait_for_service(timeout_sec=0.05):
+            return
+        req = GetDatum.Request()
+        future = self._nav_get_datum_client.call_async(req)
+        res = self._wait_for_future(future, min(self.request_timeout_s, 0.5))
+        if res is None or not bool(getattr(res, "ok", False)):
+            return
+        if not bool(getattr(res, "already_set", False)):
+            return
+        datum_lat = float(getattr(res, "datum_lat", float("nan")))
+        datum_lon = float(getattr(res, "datum_lon", float("nan")))
+        if (not np.isfinite(datum_lat)) or (not np.isfinite(datum_lon)):
+            return
+        with self._lock:
+            self._datum_lat = datum_lat
+            self._datum_lon = datum_lon
+
     def _on_robot_heading_odom(self, msg: Odometry) -> None:
         q = msg.pose.pose.orientation
         heading_deg = self._yaw_deg_from_quaternion(
@@ -1645,10 +1747,43 @@ class WebZoneServerNode(Node):
         )
         if heading_deg is None:
             return
+        projected_pose = None
+        should_broadcast = False
+        now = time.monotonic()
         with self._lock:
             self._last_robot_heading_deg = float(heading_deg)
-            if self._last_robot_pose is not None:
+            should_project = self._should_project_odom_pose_locked()
+            last_sent = self._last_gps_broadcast_monotonic
+        min_interval = 1.0 / max(0.1, float(self.gps_broadcast_hz))
+        should_sample_projection = (
+            should_project
+            and str(msg.header.frame_id or "") == self.map_frame
+            and (last_sent is None or (now - last_sent) >= min_interval)
+        )
+        if should_sample_projection:
+            projected_ll = self._project_map_xy_to_ll_via_service(
+                float(msg.pose.pose.position.x),
+                float(msg.pose.pose.position.y),
+                float(msg.pose.pose.position.z),
+            )
+            if projected_ll is not None:
+                projected_pose = self._build_robot_pose(
+                    lat=projected_ll[0],
+                    lon=projected_ll[1],
+                    heading_deg=heading_deg,
+                )
+        with self._lock:
+            if projected_pose is not None:
+                self._last_robot_pose = projected_pose
+                self._last_gps_broadcast_monotonic = now
+                should_broadcast = True
+            elif self._last_robot_pose is not None:
                 self._last_robot_pose["heading_deg"] = float(heading_deg)
+        if should_broadcast and projected_pose is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._broadcast({"op": "robot_pose", "pose": projected_pose}),
+                self._loop,
+            )
 
     def _on_nav_telemetry(self, msg: NavTelemetry) -> None:
         robot_pose_payload = None
@@ -1676,7 +1811,11 @@ class WebZoneServerNode(Node):
                 "last_cmd_age_s": last_cmd_age,
             }
 
-            if np.isfinite(msg.robot_lat) and np.isfinite(msg.robot_lon):
+            if (
+                (not self._should_project_odom_pose_locked())
+                and np.isfinite(msg.robot_lat)
+                and np.isfinite(msg.robot_lon)
+            ):
                 self._last_robot_pose = self._build_robot_pose(
                     lat=float(msg.robot_lat),
                     lon=float(msg.robot_lon),
@@ -1903,7 +2042,11 @@ class WebZoneServerNode(Node):
                 "angular_z_cmd": float(response.manual_angular_z_cmd),
                 "last_cmd_age_s": None,
             }
-            if np.isfinite(response.robot_lat) and np.isfinite(response.robot_lon):
+            if (
+                (not self._should_project_odom_pose_locked())
+                and np.isfinite(response.robot_lat)
+                and np.isfinite(response.robot_lon)
+            ):
                 self._last_robot_pose = self._build_robot_pose(
                     lat=float(response.robot_lat),
                     lon=float(response.robot_lon),
@@ -1968,6 +2111,15 @@ class WebZoneServerNode(Node):
         self._update_nav_state(res)
         return True, ""
 
+    @staticmethod
+    def _normalize_yaw_deg(yaw_deg: float) -> float:
+        yaw = float(yaw_deg)
+        while yaw <= -180.0:
+            yaw += 360.0
+        while yaw > 180.0:
+            yaw -= 360.0
+        return float(yaw)
+
     def set_nav_goals(
         self, waypoints: List[Dict[str, float]], loop: bool
     ) -> Tuple[bool, str, int, bool]:
@@ -1986,25 +2138,45 @@ class WebZoneServerNode(Node):
             f"WS->ROS set_nav_goals (count={len(waypoints)}, loop={bool(loop)})"
         )
         req = SetNavGoalLL.Request()
+        loop_enabled = bool(loop and (len(waypoints) > 1))
 
-        req.lats = [float(wp["lat"]) for wp in waypoints]
-        req.lons = [float(wp["lon"]) for wp in waypoints]
-        req.yaws_deg = [float(wp.get("yaw_deg", 0.0)) for wp in waypoints]
-        req.loop = bool(loop)
+        if len(waypoints) == 1:
+            waypoint = waypoints[0]
+            req.lats = []
+            req.lons = []
+            req.yaws_deg = []
+            req.lat = float(waypoint["lat"])
+            req.lon = float(waypoint["lon"])
+            req.yaw_deg = self._normalize_yaw_deg(float(waypoint.get("yaw_deg", 0.0)))
+        else:
+            req.lats = [float(wp["lat"]) for wp in waypoints]
+            req.lons = [float(wp["lon"]) for wp in waypoints]
+            req.yaws_deg = [
+                self._normalize_yaw_deg(float(wp.get("yaw_deg", 0.0)))
+                for wp in waypoints
+            ]
+            # Keep legacy single-goal fields populated for compatibility.
+            req.lat = float(req.lats[0])
+            req.lon = float(req.lons[0])
+            req.yaw_deg = float(req.yaws_deg[0])
+        req.loop = loop_enabled
 
-        # Keep legacy single-goal fields populated for compatibility.
-        req.lat = float(req.lats[0])
-        req.lon = float(req.lons[0])
-        req.yaw_deg = float(req.yaws_deg[0])
-
-        res = self._call_service(self._nav_set_goal_client, req, self.set_goal_timeout_s)
+        # Multiple LL->map conversions plus Nav2 goal dispatch can take longer than
+        # the generic request timeout, especially when datum/fromLL is still warming up.
+        goal_timeout_s = max(float(self.set_goal_timeout_s), 6.0 + (2.5 * float(len(waypoints))))
+        res = self._call_service(self._nav_set_goal_client, req, goal_timeout_s)
         if res is None:
-            return False, "set_goal_ll timeout", len(waypoints), bool(loop)
+            return (
+                False,
+                f"set_goal_ll timeout after {goal_timeout_s:.1f}s",
+                len(waypoints),
+                loop_enabled,
+            )
         if not res.ok:
             self.get_logger().warning(f"set_nav_goals failed: {res.error}")
         else:
             self.get_logger().info("set_nav_goals ok")
-        return bool(res.ok), str(res.error), len(waypoints), bool(loop)
+        return bool(res.ok), str(res.error), len(waypoints), loop_enabled
 
     def save_waypoints_file(self, waypoints: List[Dict[str, float]]) -> Tuple[bool, str, int]:
         ok, err, count = save_waypoints_yaml_file(self.waypoints_file, waypoints)
@@ -2118,6 +2290,7 @@ class WebZoneServerNode(Node):
         error = str(getattr(res, "error", "") or "")
         status_message = str(getattr(res, "status_message", "") or "")
         if ok:
+            self._refresh_datum_from_service()
             return True, status_message
         if error:
             return False, error
@@ -2363,11 +2536,12 @@ class WebSocketApi:
         self.node.add_client(ws)
         try:
             await self._send_json(ws, self.node.snapshot_state())
-            connect_reload_task = asyncio.create_task(self._reload_zones_on_connect())
-            pending_tasks.add(connect_reload_task)
-            connect_reload_task.add_done_callback(
-                lambda done: pending_tasks.discard(done)
-            )
+            if self.node.reload_zones_on_connect:
+                connect_reload_task = asyncio.create_task(self._reload_zones_on_connect())
+                pending_tasks.add(connect_reload_task)
+                connect_reload_task.add_done_callback(
+                    lambda done: pending_tasks.discard(done)
+                )
             async for raw in ws:
                 task = asyncio.create_task(self._handle_message_safe(ws, raw))
                 pending_tasks.add(task)

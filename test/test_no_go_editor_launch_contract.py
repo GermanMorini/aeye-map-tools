@@ -27,7 +27,7 @@ def test_no_go_editor_launch_exposes_sensor_info_topics_for_web_gateway() -> Non
     launch_path = Path(__file__).resolve().parents[1] / "launch" / "no_go_editor.launch.py"
     launch_contents = launch_path.read_text(encoding="utf-8")
 
-    assert 'DeclareLaunchArgument("odom_topic", default_value="/odometry/filtered")' in launch_contents
+    assert 'DeclareLaunchArgument("odom_topic", default_value="/odometry/local")' in launch_contents
     assert (
         'DeclareLaunchArgument(\n'
         '                "robot_heading_topic", default_value="/odometry/global"\n'
@@ -50,6 +50,26 @@ def test_no_go_editor_launch_exposes_sensor_info_topics_for_web_gateway() -> Non
     assert '"rtcm_count_topic": rtcm_count_topic' in launch_contents
     assert '"gps_raw_topic": gps_raw_topic' in launch_contents
     assert '"rtk_source_status_topic": rtk_source_status_topic' in launch_contents
+    assert '"nav_get_datum_service": nav_get_datum_service' in launch_contents
+
+
+def test_no_go_editor_launch_exposes_global_pose_projection_inputs_for_web_gateway() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "no_go_editor.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert (
+        'DeclareLaunchArgument("project_odom_to_geodetic", default_value="false")'
+        in launch_contents
+    )
+    assert 'DeclareLaunchArgument("reload_zones_on_connect", default_value="true")' in launch_contents
+    assert '"project_odom_to_geodetic": project_odom_to_geodetic' in launch_contents
+    assert '"reload_zones_on_connect": reload_zones_on_connect' in launch_contents
+    assert (
+        'DeclareLaunchArgument(\n'
+        '                "nav_get_datum_service",\n'
+        '                default_value="/datum_setter/get_datum",\n'
+        "            )"
+    ) in launch_contents
     assert '"nav_get_datum_service": nav_get_datum_service' in launch_contents
 
 

@@ -1413,7 +1413,13 @@
             </div>
             <div class="row nav-loop-row">
               <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
-                <input id="goalLoop" type="checkbox" checked style="width:auto;" /> Loop route
+                <input id="goalLoop" type="checkbox" style="width:auto;" /> Loop route
+              </label>
+            </div>
+            <div class="row nav-loop-row">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+                Goal gap (m)
+                <input id="goalMinSpacing" type="number" min="0" max="30" step="0.5" value="6.0" style="width:84px;" />
               </label>
             </div>
           </div>
@@ -1425,7 +1431,7 @@
             <label>
               Linear speed (m/2): <span id="manualLinearValue">1.20</span>
             </label>
-            <input id="manualLinearSlider" type="range" min="1.0" max="4.0" step="0.01" value="1.20" />
+            <input id="manualLinearSlider" type="range" min="1.2" max="4.0" step="0.01" value="1.20" />
             <label>
               Angular speed (rad/s): <span id="manualAngularValue">0.40</span>
             </label>
@@ -1608,6 +1614,10 @@
     const GPS_NATIVE_MAX_ZOOM = 19;
     const GPS_MAX_ZOOM = 26;
     const GPS_DEFAULT_ZOOM = GPS_NATIVE_MAX_ZOOM - 3;
+    const DEFAULT_GOAL_MIN_SPACING_M = 6.0;
+    const MAX_GOAL_YAW_DELTA_FROM_ROUTE_DEG = 85.0;
+    const MAX_GOAL_TURNAROUND_DELTA_DEG = 135.0;
+    const EARTH_RADIUS_M = 6378137.0;
     const map = L.map('map', { zoomControl: true }).setView(
       [-31.421785, -64.102448],
       GPS_DEFAULT_ZOOM
@@ -1653,6 +1663,7 @@
     const state = {
       ws: null,
       connected: false,
+      autostartConnect: false,
       connectionPreset: 'real',
       connectionPresetValues: {
         real: { host: REAL_WS_DEFAULT_HOST, port: DEFAULT_WS_PORT },
@@ -1791,6 +1802,31 @@
     function getPageHostnameOrLocalhost() {
       const host = String(window.location.hostname || '').trim();
       return host || 'localhost';
+    }
+
+    function readConnectionQueryOverrides() {
+      try {
+        const params = new URLSearchParams(window.location.search || '');
+        const presetRaw = String(params.get('preset') || '').trim();
+        const preset = presetRaw ? normalizeConnectionPreset(presetRaw) : '';
+        const host = String(params.get('host') || '').trim();
+        const port = String(params.get('port') || '').trim();
+        const autoconnectRaw = String(params.get('autoconnect') || '').trim().toLowerCase();
+        const autoconnect = ['1', 'true', 'yes', 'on'].includes(autoconnectRaw);
+        return {
+          preset,
+          host,
+          port,
+          autoconnect
+        };
+      } catch (_) {
+        return {
+          preset: '',
+          host: '',
+          port: '',
+          autoconnect: false
+        };
+      }
     }
 
     function normalizeConnectionPreset(value) {
@@ -1946,7 +1982,7 @@
     const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
     const CONTROL_HEARTBEAT_INTERVAL_MS = 2000;
     const REQUEST_TIMEOUT_OVERRIDES_MS = {
-      set_goal_ll: 15000
+      set_goal_ll: 30000
     };
     const TRACKED_OP_UI = {
       set_zones_geojson: {
@@ -2972,6 +3008,150 @@
       return normalizeYawDeg(yawDeg);
     }
 
+    function getGoalMinSpacingM() {
+      const raw = Number(document.getElementById('goalMinSpacing')?.value ?? DEFAULT_GOAL_MIN_SPACING_M);
+      if (!Number.isFinite(raw)) {
+        return DEFAULT_GOAL_MIN_SPACING_M;
+      }
+      return Math.max(0.0, raw);
+    }
+
+    function getRobotLatLng() {
+      if (!state.robotMarker || typeof state.robotMarker.getLatLng !== 'function') {
+        return null;
+      }
+      return state.robotMarker.getLatLng();
+    }
+
+    function clampYawAroundReference(rawYawDeg, referenceYawDeg, maxDeltaDeg = MAX_GOAL_YAW_DELTA_FROM_ROUTE_DEG) {
+      if (!Number.isFinite(Number(referenceYawDeg))) {
+        return normalizeYawDeg(rawYawDeg);
+      }
+      const maxDelta = Math.max(0.0, Number(maxDeltaDeg) || 0.0);
+      const delta = normalizeYawDeg(Number(rawYawDeg) - Number(referenceYawDeg));
+      const clampedDelta = Math.max(-maxDelta, Math.min(maxDelta, delta));
+      return normalizeYawDeg(Number(referenceYawDeg) + clampedDelta);
+    }
+
+    function preventFullTurnGoalYaw(rawYawDeg, routeYawDeg) {
+      if (!Number.isFinite(Number(routeYawDeg))) {
+        return normalizeYawDeg(rawYawDeg);
+      }
+      const requestedYawDeg = normalizeYawDeg(rawYawDeg);
+      const yawDeltaDeg = Math.abs(normalizeYawDeg(requestedYawDeg - Number(routeYawDeg)));
+      if (yawDeltaDeg >= MAX_GOAL_TURNAROUND_DELTA_DEG) {
+        return normalizeYawDeg(routeYawDeg);
+      }
+      return clampYawAroundReference(requestedYawDeg, routeYawDeg);
+    }
+
+    function destinationLatLng(origin, bearingDeg, distanceM) {
+      const angularDistance = Math.max(0.0, Number(distanceM) || 0.0) / EARTH_RADIUS_M;
+      const bearingRad = Number(bearingDeg || 0.0) * Math.PI / 180.0;
+      const lat1 = Number(origin.lat) * Math.PI / 180.0;
+      const lon1 = Number(origin.lng) * Math.PI / 180.0;
+      const sinLat1 = Math.sin(lat1);
+      const cosLat1 = Math.cos(lat1);
+      const sinAd = Math.sin(angularDistance);
+      const cosAd = Math.cos(angularDistance);
+      const lat2 = Math.asin(
+        (sinLat1 * cosAd) + (cosLat1 * sinAd * Math.cos(bearingRad))
+      );
+      const lon2 = lon1 + Math.atan2(
+        Math.sin(bearingRad) * sinAd * cosLat1,
+        cosAd - (sinLat1 * Math.sin(lat2))
+      );
+      return L.latLng(lat2 * 180.0 / Math.PI, lon2 * 180.0 / Math.PI);
+    }
+
+    function getLastRouteBearingDeg(waypoints) {
+      if (!Array.isArray(waypoints) || waypoints.length === 0) {
+        return null;
+      }
+      if (waypoints.length >= 2) {
+        return yawDegFromLatLng(waypoints[waypoints.length - 2], waypoints[waypoints.length - 1]);
+      }
+      const robotLatLng = getRobotLatLng();
+      if (!robotLatLng) {
+        return null;
+      }
+      return yawDegFromLatLng(robotLatLng, waypoints[0]);
+    }
+
+    function getWaypointRouteYawReference(waypoints, index) {
+      if (!Array.isArray(waypoints) || index < 0 || index >= waypoints.length) {
+        return null;
+      }
+      const current = waypoints[index];
+      if (!current) {
+        return null;
+      }
+      if (index < (waypoints.length - 1)) {
+        return yawDegFromLatLng(current, waypoints[index + 1]);
+      }
+      if (index > 0) {
+        return yawDegFromLatLng(waypoints[index - 1], current);
+      }
+      const robotLatLng = getRobotLatLng();
+      if (!robotLatLng) {
+        return null;
+      }
+      return yawDegFromLatLng(robotLatLng, current);
+    }
+
+    function buildConstrainedGoalWaypoints(rawWaypoints) {
+      const normalizedWaypoints = rawWaypoints
+        .map(normalizeIncomingWaypoint)
+        .filter((wp) => wp !== null);
+      const constrainedWaypoints = [];
+      const minSpacingM = getGoalMinSpacingM();
+
+      normalizedWaypoints.forEach((wp) => {
+        let latLng = L.latLng(wp.lat, wp.lon);
+        const referenceLatLng = constrainedWaypoints.length > 0
+          ? L.latLng(
+              constrainedWaypoints[constrainedWaypoints.length - 1].lat,
+              constrainedWaypoints[constrainedWaypoints.length - 1].lon
+            )
+          : getRobotLatLng();
+        if (referenceLatLng && minSpacingM > 0.0) {
+          const distanceM = map.distance(referenceLatLng, latLng);
+          if (Number.isFinite(distanceM) && distanceM < minSpacingM) {
+            const fallbackBearingDeg = getLastRouteBearingDeg(constrainedWaypoints);
+            const travelBearingDeg = (distanceM > 0.05)
+              ? yawDegFromLatLng(referenceLatLng, latLng)
+              : fallbackBearingDeg;
+            if (Number.isFinite(Number(travelBearingDeg))) {
+              latLng = destinationLatLng(referenceLatLng, travelBearingDeg, minSpacingM);
+            }
+          }
+        }
+        constrainedWaypoints.push({
+          lat: Number(latLng.lat),
+          lon: Number(latLng.lng),
+          yaw_deg: normalizeYawDeg(wp.yaw_deg)
+        });
+      });
+
+      return constrainedWaypoints.map((wp, index, waypoints) => {
+        const routeYawDeg = getWaypointRouteYawReference(waypoints, index);
+        return {
+          lat: wp.lat,
+          lon: wp.lon,
+          yaw_deg: Number.isFinite(Number(routeYawDeg))
+            ? preventFullTurnGoalYaw(wp.yaw_deg, routeYawDeg)
+            : normalizeYawDeg(wp.yaw_deg)
+        };
+      });
+    }
+
+    function applyGoalWaypointPolicies(statusText = null, ok = null) {
+      state.goalWaypoints = buildConstrainedGoalWaypoints(state.goalWaypoints);
+      renderGoalWaypoints();
+      updateGoalButtonsState();
+      updateWaypointStatus(statusText, ok);
+    }
+
     function buildWaypointIcon(index, yawDeg, draft = false, selected = false) {
       const yaw = normalizeYawDeg(yawDeg);
       // ROS yaw: 0 deg = +X (east), CCW positive.
@@ -3056,9 +3236,7 @@
           if (!map.dragging.enabled()) {
             map.dragging.enable();
           }
-          renderGoalWaypoints();
-          updateGoalButtonsState();
-          updateWaypointStatus(`Waypoint ${idx + 1} moved`, true);
+          applyGoalWaypointPolicies(`Waypoint ${idx + 1} moved`, true);
         });
         marker.on('click', (evt) => {
           if (evt && evt.originalEvent) {
@@ -3248,9 +3426,7 @@
       state.goalWaypoints = state.goalWaypoints.filter((_, idx) => !state.selectedWaypointIndices.has(idx));
       clearWaypointSelection();
       state.goalDraft = null;
-      renderGoalWaypoints();
-      updateGoalButtonsState();
-      updateWaypointStatus(`Removed ${selectedCount} ${label}`, true);
+      applyGoalWaypointPolicies(`Removed ${selectedCount} ${label}`, true);
     }
 
     function setGoalModeUi(enabled) {
@@ -3264,7 +3440,7 @@
       if (state.goalMode) {
         btn.classList.add('active');
         updateWaypointStatus(
-          'Waypoint mode activo: click+arrastre para fijar yaw de cada waypoint',
+          `Waypoint mode activo: sin giros 360 y gap minimo ${getGoalMinSpacingM().toFixed(1)} m`,
           true
         );
       } else {
@@ -3280,9 +3456,7 @@
         yaw_deg: normalizeYawDeg(yawDeg)
       });
       clearWaypointSelection();
-      renderGoalWaypoints();
-      updateGoalButtonsState();
-      updateWaypointStatus();
+      applyGoalWaypointPolicies();
     }
 
     function clearWaypoints() {
@@ -3304,9 +3478,7 @@
         Array.from(state.selectedWaypointIndices)
           .filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < state.goalWaypoints.length)
       );
-      renderGoalWaypoints();
-      updateGoalButtonsState();
-      updateWaypointStatus();
+      applyGoalWaypointPolicies();
     }
 
     function normalizeIncomingWaypoint(item) {
@@ -3336,17 +3508,28 @@
         updateWaypointStatus('Add at least one waypoint before sending', false);
         return;
       }
+      state.goalWaypoints = buildConstrainedGoalWaypoints(state.goalWaypoints);
+      renderGoalWaypoints();
+      updateGoalButtonsState();
       const payloadWaypoints = state.goalWaypoints.map((wp) => ({
         lat: Number(wp.lat),
         lon: Number(wp.lon),
         yaw_deg: Number(wp.yaw_deg || 0.0)
       }));
       const loopEnabled = Boolean(document.getElementById('goalLoop')?.checked);
-      const goalRequest = {
-        op: 'set_goal_ll',
-        waypoints: payloadWaypoints,
-        loop: loopEnabled
-      };
+      const goalRequest = (payloadWaypoints.length === 1)
+        ? {
+            op: 'set_goal_ll',
+            lat: Number(payloadWaypoints[0].lat),
+            lon: Number(payloadWaypoints[0].lon),
+            yaw_deg: Number(payloadWaypoints[0].yaw_deg || 0.0),
+            loop: false
+          }
+        : {
+            op: 'set_goal_ll',
+            waypoints: payloadWaypoints,
+            loop: loopEnabled
+          };
       if (state.manualControl.enabled) {
         state.pendingGoalAfterManualOff = goalRequest;
         const reqId = send({ op: 'set_manual_mode', enabled: false });
@@ -3385,10 +3568,19 @@
     }
 
     function startGoalDraft(latlng) {
-      state.goalDraft = {
+      const constrainedDrafts = buildConstrainedGoalWaypoints([
+        ...state.goalWaypoints,
+        { lat: Number(latlng.lat), lon: Number(latlng.lng), yaw_deg: 0.0 }
+      ]);
+      const constrainedDraft = constrainedDrafts[constrainedDrafts.length - 1] || {
         lat: Number(latlng.lat),
         lon: Number(latlng.lng),
-        yaw_deg: 0.0,
+        yaw_deg: 0.0
+      };
+      state.goalDraft = {
+        lat: Number(constrainedDraft.lat),
+        lon: Number(constrainedDraft.lon),
+        yaw_deg: normalizeYawDeg(constrainedDraft.yaw_deg),
         dragYaw: false
       };
       renderGoalWaypoints();
@@ -3400,8 +3592,18 @@
       const distanceM = map.distance(origin, latlng);
       const dragYaw = distanceM > 0.35;
       state.goalDraft.dragYaw = dragYaw;
+      const previewWaypoints = buildConstrainedGoalWaypoints([
+        ...state.goalWaypoints,
+        { lat: Number(origin.lat), lon: Number(origin.lng), yaw_deg: state.goalDraft.yaw_deg }
+      ]);
+      const routeYawDeg = getWaypointRouteYawReference(previewWaypoints, previewWaypoints.length - 1);
       if (dragYaw) {
-        state.goalDraft.yaw_deg = yawDegFromLatLng(origin, latlng);
+        const rawYawDeg = yawDegFromLatLng(origin, latlng);
+        state.goalDraft.yaw_deg = Number.isFinite(Number(routeYawDeg))
+          ? preventFullTurnGoalYaw(rawYawDeg, routeYawDeg)
+          : rawYawDeg;
+      } else if (Number.isFinite(Number(routeYawDeg))) {
+        state.goalDraft.yaw_deg = normalizeYawDeg(routeYawDeg);
       }
       renderGoalWaypoints();
     }
@@ -5285,9 +5487,7 @@
             state.goalWaypoints = waypoints;
             clearWaypointSelection();
             state.goalDraft = null;
-            renderGoalWaypoints();
-            updateGoalButtonsState();
-            updateWaypointStatus(`Waypoints loaded (${waypoints.length})`, true);
+            applyGoalWaypointPolicies(`Waypoints loaded (${waypoints.length})`, true);
           } else {
             updateWaypointStatus(`Load failed: ${msg.error || 'error'}`, false);
           }
@@ -5980,11 +6180,27 @@
     document.getElementById('sendGoalsBtn').addEventListener('click', () => {
       sendCurrentWaypoints();
     });
+    document.getElementById('goalMinSpacing').addEventListener('change', () => {
+      if (!Number.isFinite(Number(document.getElementById('goalMinSpacing')?.value))) {
+        document.getElementById('goalMinSpacing').value = String(DEFAULT_GOAL_MIN_SPACING_M);
+      }
+      if (state.goalMode) {
+        applyGoalWaypointPolicies(
+          `Waypoint mode activo: sin giros 360 y gap minimo ${getGoalMinSpacingM().toFixed(1)} m`,
+          true
+        );
+        return;
+      }
+      applyGoalWaypointPolicies();
+    });
     document.getElementById('saveWaypointsBtn').addEventListener('click', () => {
       if (state.goalWaypoints.length === 0) {
         updateWaypointStatus('No waypoints to save', false);
         return;
       }
+      state.goalWaypoints = buildConstrainedGoalWaypoints(state.goalWaypoints);
+      renderGoalWaypoints();
+      updateGoalButtonsState();
       const waypoints = state.goalWaypoints.map((wp) => ({
         lat: Number(wp.lat),
         lon: Number(wp.lon),
@@ -6277,6 +6493,19 @@
       const storedConnection = readConnectionPresetStorage();
       state.connectionPreset = storedConnection.preset;
       state.connectionPresetValues = storedConnection.presets;
+      const queryConnection = readConnectionQueryOverrides();
+      if (queryConnection.preset) {
+        state.connectionPreset = queryConnection.preset;
+      }
+      if (queryConnection.host || queryConnection.port) {
+        const targetPreset = queryConnection.preset || state.connectionPreset;
+        const fallback = getPresetDefaults(targetPreset);
+        state.connectionPresetValues[targetPreset] = {
+          host: queryConnection.host || fallback.host,
+          port: queryConnection.port || fallback.port
+        };
+      }
+      state.autostartConnect = queryConnection.autoconnect === true;
     }
     initializeTrackedButtonsUi();
     setConnectButtonConnecting(false);
@@ -6296,6 +6525,11 @@
     updateMapToolsToolbarUi();
     renderActiveMapTool();
     renderSensorInfoPanel();
+    if (state.autostartConnect) {
+      window.setTimeout(() => {
+        connectWs();
+      }, 0);
+    }
   </script>
 </body>
 </html>
