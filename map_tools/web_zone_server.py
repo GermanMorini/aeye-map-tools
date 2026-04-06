@@ -49,13 +49,16 @@ from interfaces.srv import (
     GetNavSnapshot,
     GetNavState,
     GetZonesState,
-    SetControlLock,
     SetManualMode,
     SetNavGoalLL,
     SetDatum,
     SetZonesGeoJson,
-    TouchControlHeartbeat,
 )
+try:
+    from interfaces.srv import SetControlLock, TouchControlHeartbeat
+except ImportError:
+    SetControlLock = None
+    TouchControlHeartbeat = None
 from robot_localization.srv import ToLL
 from .waypoints_file_utils import load_waypoints_yaml_file, save_waypoints_yaml_file
 
@@ -1051,11 +1054,19 @@ class WebZoneServerNode(Node):
             self.nav_set_manual_mode_service,
             callback_group=self._service_client_group,
         )
-        self._nav_set_control_lock_client = self.create_client(
-            SetControlLock, self.nav_set_control_lock_service
+        self._nav_set_control_lock_client = (
+            self.create_client(
+                SetControlLock, self.nav_set_control_lock_service
+            )
+            if SetControlLock is not None
+            else None
         )
-        self._nav_touch_control_heartbeat_client = self.create_client(
-            TouchControlHeartbeat, self.nav_touch_control_heartbeat_service
+        self._nav_touch_control_heartbeat_client = (
+            self.create_client(
+                TouchControlHeartbeat, self.nav_touch_control_heartbeat_service
+            )
+            if TouchControlHeartbeat is not None
+            else None
         )
         self._nav_set_datum_client = self.create_client(
             SetDatum,
@@ -2248,6 +2259,8 @@ class WebZoneServerNode(Node):
         return True, ""
 
     def set_control_lock(self, locked: bool) -> Tuple[bool, str, bool]:
+        if SetControlLock is None or self._nav_set_control_lock_client is None:
+            return False, "set_control_lock unsupported by installed interfaces package", bool(locked)
         req = SetControlLock.Request()
         req.locked = bool(locked)
         res = self._call_service(self._nav_set_control_lock_client, req, self.request_timeout_s)
@@ -2262,6 +2275,8 @@ class WebZoneServerNode(Node):
         return bool(res.ok), str(res.error), locked_after
 
     def touch_control_heartbeat(self) -> Tuple[bool, str, bool]:
+        if TouchControlHeartbeat is None or self._nav_touch_control_heartbeat_client is None:
+            return False, "control_heartbeat unsupported by installed interfaces package", True
         req = TouchControlHeartbeat.Request()
         res = self._call_service(
             self._nav_touch_control_heartbeat_client,
