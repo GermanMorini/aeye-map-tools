@@ -1320,6 +1320,9 @@
               <input id="wsHost" value="" placeholder="Robot IP / host" />
               <input id="wsPort" value="8766" placeholder="Port" />
             </div>
+            <div class="row">
+              <input id="cameraStreamHost" value="" placeholder="Camera stream IP / host (optional)" />
+            </div>
             <div class="connection-actions-grid">
               <button id="connectBtn">
                 <span class="btn-icon" aria-hidden="true">
@@ -1666,8 +1669,8 @@
       autostartConnect: false,
       connectionPreset: 'real',
       connectionPresetValues: {
-        real: { host: getDefaultRealHost(), port: DEFAULT_WS_PORT },
-        sim: { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT }
+        real: { host: getDefaultRealHost(), port: DEFAULT_WS_PORT, cameraHost: '' },
+        sim: { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT, cameraHost: '' }
       },
       seqZoneId: 1,
       frameId: 'map',
@@ -1824,12 +1827,14 @@
         const preset = presetRaw ? normalizeConnectionPreset(presetRaw) : '';
         const host = String(params.get('host') || '').trim();
         const port = String(params.get('port') || '').trim();
+        const cameraHost = String(params.get('camera_host') || '').trim();
         const autoconnectRaw = String(params.get('autoconnect') || '').trim().toLowerCase();
         const autoconnect = ['1', 'true', 'yes', 'on'].includes(autoconnectRaw);
         return {
           preset,
           host,
           port,
+          cameraHost,
           autoconnect
         };
       } catch (_) {
@@ -1837,6 +1842,7 @@
           preset: '',
           host: '',
           port: '',
+          cameraHost: '',
           autoconnect: false
         };
       }
@@ -1848,17 +1854,17 @@
 
     function getPresetDefaults(preset) {
       if (normalizeConnectionPreset(preset) === 'sim') {
-        return { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT };
+        return { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT, cameraHost: '' };
       }
-      return { host: getDefaultRealHost(), port: DEFAULT_WS_PORT };
+      return { host: getDefaultRealHost(), port: DEFAULT_WS_PORT, cameraHost: '' };
     }
 
     function readConnectionPresetStorage() {
       const fallback = {
         preset: 'real',
         presets: {
-          real: { host: getDefaultRealHost(), port: DEFAULT_WS_PORT },
-          sim: { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT }
+          real: { host: getDefaultRealHost(), port: DEFAULT_WS_PORT, cameraHost: '' },
+          sim: { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT, cameraHost: '' }
         }
       };
       try {
@@ -1873,11 +1879,13 @@
           presets: {
             real: {
               host: String(presets && presets.real && presets.real.host || realDefaults.host),
-              port: String(presets && presets.real && presets.real.port || realDefaults.port)
+              port: String(presets && presets.real && presets.real.port || realDefaults.port),
+              cameraHost: String(presets && presets.real && presets.real.cameraHost || realDefaults.cameraHost)
             },
             sim: {
               host: String(presets && presets.sim && presets.sim.host || simDefaults.host),
-              port: String(presets && presets.sim && presets.sim.port || simDefaults.port)
+              port: String(presets && presets.sim && presets.sim.port || simDefaults.port),
+              cameraHost: String(presets && presets.sim && presets.sim.cameraHost || simDefaults.cameraHost)
             }
           }
         };
@@ -1909,14 +1917,18 @@
       const fallback = getPresetDefaults(preset);
       const hostInput = document.getElementById('wsHost');
       const portInput = document.getElementById('wsPort');
+      const cameraHostInput = document.getElementById('cameraStreamHost');
       const wsHost = normalizeHostValue(hostInput?.value || fallback.host) || fallback.host;
       const wsPort = String(portInput?.value || fallback.port).trim() || fallback.port;
+      const cameraHostOverride = normalizeHostValue(cameraHostInput?.value || fallback.cameraHost);
+      const cameraStreamHost = cameraHostOverride || wsHost;
       return {
         preset,
         wsHost,
         wsPort,
+        cameraStreamHost,
         cameraEnabled: preset !== 'sim',
-        cameraIframeUrl: preset === 'sim' ? '' : buildCameraIframeUrl(wsHost)
+        cameraIframeUrl: preset === 'sim' ? '' : buildCameraIframeUrl(cameraStreamHost)
       };
     }
 
@@ -1928,10 +1940,12 @@
       const preset = getEffectiveConnectionPreset();
       const hostInput = document.getElementById('wsHost');
       const portInput = document.getElementById('wsPort');
-      if (!hostInput || !portInput) return;
+      const cameraHostInput = document.getElementById('cameraStreamHost');
+      if (!hostInput || !portInput || !cameraHostInput) return;
       state.connectionPresetValues[preset] = {
         host: normalizeHostValue(hostInput.value || '') || getPresetDefaults(preset).host,
-        port: String(portInput.value || '').trim() || getPresetDefaults(preset).port
+        port: String(portInput.value || '').trim() || getPresetDefaults(preset).port,
+        cameraHost: normalizeHostValue(cameraHostInput.value || '')
       };
       persistConnectionPresetStorage();
     }
@@ -1972,8 +1986,10 @@
       const values = state.connectionPresetValues[nextPreset] || getPresetDefaults(nextPreset);
       const hostInput = document.getElementById('wsHost');
       const portInput = document.getElementById('wsPort');
+      const cameraHostInput = document.getElementById('cameraStreamHost');
       if (hostInput) hostInput.value = values.host;
       if (portInput) portInput.value = values.port;
+      if (cameraHostInput) cameraHostInput.value = values.cameraHost || '';
       syncConnectionPresetSelect();
       persistConnectionPresetStorage();
       applyConnectionPresetUi();
@@ -6120,11 +6136,13 @@
     };
     document.getElementById('wsHost').addEventListener('keydown', connectOnEnter);
     document.getElementById('wsPort').addEventListener('keydown', connectOnEnter);
+    document.getElementById('cameraStreamHost').addEventListener('keydown', connectOnEnter);
     document.getElementById('connectionPreset').addEventListener('change', (event) => {
       applyConnectionPreset(event.target?.value || 'real');
     });
     document.getElementById('wsHost').addEventListener('input', rememberCurrentConnectionFields);
     document.getElementById('wsPort').addEventListener('input', rememberCurrentConnectionFields);
+    document.getElementById('cameraStreamHost').addEventListener('input', rememberCurrentConnectionFields);
     document.getElementById('disconnectBtn').addEventListener('click', disconnectWs);
     document.getElementById('menuBtn').addEventListener('click', () => {
       openMenuModal();
@@ -6510,12 +6528,13 @@
       if (queryConnection.preset) {
         state.connectionPreset = queryConnection.preset;
       }
-      if (queryConnection.host || queryConnection.port) {
+      if (queryConnection.host || queryConnection.port || queryConnection.cameraHost) {
         const targetPreset = queryConnection.preset || state.connectionPreset;
         const fallback = getPresetDefaults(targetPreset);
         state.connectionPresetValues[targetPreset] = {
           host: normalizeHostValue(queryConnection.host || '') || fallback.host,
-          port: queryConnection.port || fallback.port
+          port: queryConnection.port || fallback.port,
+          cameraHost: normalizeHostValue(queryConnection.cameraHost || '') || fallback.cameraHost
         };
       }
       state.autostartConnect = queryConnection.autoconnect === true;
