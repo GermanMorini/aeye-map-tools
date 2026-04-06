@@ -1317,7 +1317,7 @@
               </select>
             </div>
             <div class="row">
-              <input id="wsHost" value="100.111.4.7" placeholder="Host" />
+              <input id="wsHost" value="" placeholder="Robot IP / host" />
               <input id="wsPort" value="8766" placeholder="Port" />
             </div>
             <div class="connection-actions-grid">
@@ -1605,9 +1605,9 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
   <script>
-    const REAL_WS_DEFAULT_HOST = '100.111.4.7';
     const DEFAULT_WS_PORT = '8766';
-    const REAL_CAMERA_IFRAME_URL = 'http://100.111.4.7:8889/cam3/';
+    const DEFAULT_CAMERA_STREAM_PORT = '8889';
+    const DEFAULT_CAMERA_STREAM_PATH = '/cam3/';
     const CONNECTION_PRESET_STORAGE_KEY = 'map_tools.connection_presets.v1';
     const CAMERA_DISABLED_SIM_ERROR = 'disabled in sim';
     const CAMERA_OPS = new Set(['camera_pan', 'camera_zoom_toggle', 'get_camera_status']);
@@ -1666,8 +1666,8 @@
       autostartConnect: false,
       connectionPreset: 'real',
       connectionPresetValues: {
-        real: { host: REAL_WS_DEFAULT_HOST, port: DEFAULT_WS_PORT },
-        sim: { host: 'localhost', port: DEFAULT_WS_PORT }
+        real: { host: getDefaultRealHost(), port: DEFAULT_WS_PORT },
+        sim: { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT }
       },
       seqZoneId: 1,
       frameId: 'map',
@@ -1804,6 +1804,19 @@
       return host || 'localhost';
     }
 
+    function normalizeHostValue(host) {
+      return String(host || '').trim().replace(/^[a-z]+:\/\//i, '').replace(/\/+$/, '');
+    }
+
+    function getDefaultRealHost() {
+      return getPageHostnameOrLocalhost();
+    }
+
+    function buildCameraIframeUrl(host) {
+      const normalizedHost = normalizeHostValue(host) || getDefaultRealHost();
+      return `http://${normalizedHost}:${DEFAULT_CAMERA_STREAM_PORT}${DEFAULT_CAMERA_STREAM_PATH}`;
+    }
+
     function readConnectionQueryOverrides() {
       try {
         const params = new URLSearchParams(window.location.search || '');
@@ -1837,14 +1850,14 @@
       if (normalizeConnectionPreset(preset) === 'sim') {
         return { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT };
       }
-      return { host: REAL_WS_DEFAULT_HOST, port: DEFAULT_WS_PORT };
+      return { host: getDefaultRealHost(), port: DEFAULT_WS_PORT };
     }
 
     function readConnectionPresetStorage() {
       const fallback = {
         preset: 'real',
         presets: {
-          real: { host: REAL_WS_DEFAULT_HOST, port: DEFAULT_WS_PORT },
+          real: { host: getDefaultRealHost(), port: DEFAULT_WS_PORT },
           sim: { host: getPageHostnameOrLocalhost(), port: DEFAULT_WS_PORT }
         }
       };
@@ -1896,14 +1909,14 @@
       const fallback = getPresetDefaults(preset);
       const hostInput = document.getElementById('wsHost');
       const portInput = document.getElementById('wsPort');
-      const wsHost = String(hostInput?.value || fallback.host).trim() || fallback.host;
+      const wsHost = normalizeHostValue(hostInput?.value || fallback.host) || fallback.host;
       const wsPort = String(portInput?.value || fallback.port).trim() || fallback.port;
       return {
         preset,
         wsHost,
         wsPort,
         cameraEnabled: preset !== 'sim',
-        cameraIframeUrl: preset === 'sim' ? '' : REAL_CAMERA_IFRAME_URL
+        cameraIframeUrl: preset === 'sim' ? '' : buildCameraIframeUrl(wsHost)
       };
     }
 
@@ -1917,7 +1930,7 @@
       const portInput = document.getElementById('wsPort');
       if (!hostInput || !portInput) return;
       state.connectionPresetValues[preset] = {
-        host: String(hostInput.value || '').trim() || getPresetDefaults(preset).host,
+        host: normalizeHostValue(hostInput.value || '') || getPresetDefaults(preset).host,
         port: String(portInput.value || '').trim() || getPresetDefaults(preset).port
       };
       persistConnectionPresetStorage();
@@ -5123,7 +5136,7 @@
         return [null, 'Port must be an integer between 1 and 65535'];
       }
 
-      const hostNoScheme = hostRaw.replace(/^wss?:\/\//i, '').replace(/\/+$/, '');
+      const hostNoScheme = normalizeHostValue(hostRaw);
       if (!hostNoScheme) {
         return [null, 'Host is required'];
       }
@@ -6501,7 +6514,7 @@
         const targetPreset = queryConnection.preset || state.connectionPreset;
         const fallback = getPresetDefaults(targetPreset);
         state.connectionPresetValues[targetPreset] = {
-          host: queryConnection.host || fallback.host,
+          host: normalizeHostValue(queryConnection.host || '') || fallback.host,
           port: queryConnection.port || fallback.port
         };
       }
