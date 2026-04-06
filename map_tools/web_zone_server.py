@@ -855,7 +855,8 @@ class WebZoneServerNode(Node):
             "/nav_command_server/touch_control_heartbeat",
         )
         self.declare_parameter("nav_set_datum_service", "/datum_setter/set_datum")
-        self.declare_parameter("nav_get_datum_service", "/datum_setter/get_datum")
+        if not self.has_parameter("nav_get_datum_service"):
+            self.declare_parameter("nav_get_datum_service", "/datum_setter/get_datum")
         self.declare_parameter("nav_get_state_service", "/nav_command_server/get_state")
         self.declare_parameter("teleop_cmd_topic", "/cmd_vel_teleop")
 
