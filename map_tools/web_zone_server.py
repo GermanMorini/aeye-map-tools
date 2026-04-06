@@ -875,7 +875,6 @@ class WebZoneServerNode(Node):
         self.declare_parameter("rtcm_count_topic", "/gps/rtcm_received_count")
         self.declare_parameter("gps_raw_topic", "/mavros_node/gps1/raw")
         self.declare_parameter("rtk_source_status_topic", "/gps/rtk_source/status_json")
-        self.declare_parameter("nav_get_datum_service", "/datum_setter/get_datum")
 
         self.ws_host = str(self.get_parameter("ws_host").value)
         self.ws_port = int(self.get_parameter("ws_port").value)
