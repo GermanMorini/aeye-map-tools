@@ -116,6 +116,19 @@ def test_manual_disable_pending_contract_is_present() -> None:
     assert "if (state.manualDisablePending && enabledFromServer) {" in contents
 
 
+def test_manual_keyboard_releases_on_keyup_and_window_focus_loss() -> None:
+    index_path = Path(__file__).resolve().parents[1] / "web" / "index.html"
+    contents = index_path.read_text(encoding="utf-8")
+
+    assert "function releaseManualInput(options = {}) {" in contents
+    assert "sendManualCmd(0.0, 0.0, 0);" in contents
+    assert "window.addEventListener('keyup', (event) => {" in contents
+    assert "manualControlTick();" in contents
+    assert "window.addEventListener('blur', () => {" in contents
+    assert "releaseManualInput({ sendStop: true });" in contents
+    assert "document.addEventListener('visibilitychange', () => {" in contents
+
+
 def test_nav_event_can_resync_control_lock_state() -> None:
     index_path = Path(__file__).resolve().parents[1] / "web" / "index.html"
     contents = index_path.read_text(encoding="utf-8")

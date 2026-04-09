@@ -4753,6 +4753,15 @@
       state.manualCmd.angularZ = 0.0;
     }
 
+    function releaseManualInput(options = {}) {
+      const sendStop = options.sendStop === true;
+      resetManualLocalState();
+      if (sendStop) {
+        sendManualCmd(0.0, 0.0, 0);
+      }
+      renderManualStatus();
+    }
+
     function resetNavTelemetryState() {
       state.navTelemetry.goalActive = false;
       state.navTelemetry.navResultStatus = 0;
@@ -6249,6 +6258,7 @@
       if (code === 'KeyS') state.manualKeys.s = false;
       if (code === 'KeyD') state.manualKeys.d = false;
       if (code === 'Space') state.manualBrakeHeld = false;
+      manualControlTick();
       renderManualStatus();
     });
 
@@ -6320,6 +6330,7 @@
     });
     window.addEventListener('blur', () => {
       cancelGoalCreateSession();
+      releaseManualInput({ sendStop: true });
     });
     window.addEventListener('pointerup', (event) => {
       completeGoalCreateSession(event);
@@ -6330,6 +6341,7 @@
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         cancelGoalCreateSession();
+        releaseManualInput({ sendStop: true });
       }
     });
     window.addEventListener('resize', relocateTopSections);
