@@ -48,13 +48,16 @@ from interfaces.srv import (
     GetNavSnapshot,
     GetNavState,
     GetZonesState,
-    SetControlLock,
     SetManualMode,
     SetNavGoalLL,
     SetDatum,
     SetZonesGeoJson,
-    TouchControlHeartbeat,
 )
+try:
+    from interfaces.srv import SetControlLock, TouchControlHeartbeat
+except ImportError:
+    SetControlLock = None
+    TouchControlHeartbeat = None
 from .waypoints_file_utils import load_waypoints_yaml_file, save_waypoints_yaml_file
 
 
@@ -102,6 +105,36 @@ ROSBAG_TOPIC_PROFILES: Dict[str, Tuple[str, ...]] = {
         "/local_costmap/published_footprint",
         "/behavior_tree_log",
     ),
+    "sim_german_1gps": (
+        "/clock",
+        "/gps/fix_raw",
+        "/gps/fix",
+        "/imu/data_raw",
+        "/imu/data",
+        "/scan_3d_raw",
+        "/scan_3d",
+        "/scan",
+        "/odom_raw",
+        "/odom",
+        "/joint_states",
+        "/wheel/odometry",
+        "/odometry/local",
+        "/odometry/gps",
+        "/cmd_vel",
+        "/cmd_vel_safe",
+        "/cmd_vel_final",
+        "/cmd_vel_gazebo",
+        "/collision_monitor_state",
+        "/nav_command_server/telemetry",
+        "/nav_command_server/events",
+        "/controller/status",
+        "/controller/telemetry",
+        "/controller/drive_telemetry",
+        "/diagnostics",
+        "/tf",
+        "/tf_static",
+        "/rosout",
+    ),
 }
 
 UNSET = object()
@@ -121,6 +154,8 @@ FIX_PRECISION_M: Dict[int, float] = {
     5: 0.3,
     6: 0.02,
 }
+DUAL_GPS_HEADING_TOPIC = "/dual_gps/heading"
+UBLOX_NAVHEADING_TOPIC = "/ublox_rover/navheading"
 TOPICS_HISTORY_MAX_MESSAGES = 200
 TOPICS_HISTORY_MAX_TEXT_BYTES = 512 * 1024
 TOPICS_MAX_ARRAY_ITEMS = 100
@@ -1022,11 +1057,15 @@ class WebZoneServerNode(Node):
         self._nav_set_manual_mode_client = self.create_client(
             SetManualMode, self.nav_set_manual_mode_service
         )
-        self._nav_set_control_lock_client = self.create_client(
-            SetControlLock, self.nav_set_control_lock_service
+        self._nav_set_control_lock_client = (
+            self.create_client(SetControlLock, self.nav_set_control_lock_service)
+            if SetControlLock is not None
+            else None
         )
-        self._nav_touch_control_heartbeat_client = self.create_client(
-            TouchControlHeartbeat, self.nav_touch_control_heartbeat_service
+        self._nav_touch_control_heartbeat_client = (
+            self.create_client(TouchControlHeartbeat, self.nav_touch_control_heartbeat_service)
+            if TouchControlHeartbeat is not None
+            else None
         )
         self._nav_set_datum_client = self.create_client(
             SetDatum, self.nav_set_datum_service
@@ -1170,6 +1209,46 @@ class WebZoneServerNode(Node):
         catalog.sort(key=lambda entry: str(entry.get("name", "")))
         return catalog
 
+    def _count_publishers_safe(self, topic_name: str) -> Optional[int]:
+        try:
+            return int(self.count_publishers(topic_name))
+        except Exception:
+            return None
+
+    def _build_gps_mode_payload(self) -> Dict[str, Any]:
+        primary_fix_publishers = self._count_publishers_safe(self.gps_topic)
+        dual_heading_publishers = self._count_publishers_safe(DUAL_GPS_HEADING_TOPIC)
+        ublox_navheading_publishers = self._count_publishers_safe(UBLOX_NAVHEADING_TOPIC)
+
+        dual_active = any(
+            count is not None and count > 0
+            for count in (dual_heading_publishers, ublox_navheading_publishers)
+        )
+        primary_fix_active = primary_fix_publishers is not None and primary_fix_publishers > 0
+
+        if dual_active:
+            mode = "dual"
+            label = "2 GPS"
+            detail = "dual heading detectado"
+        elif primary_fix_active:
+            mode = "single"
+            label = "1 GPS"
+            detail = "solo GPS principal detectado"
+        else:
+            mode = "unknown"
+            label = "GPS ?"
+            detail = "sin publishers GPS detectados"
+
+        return {
+            "mode": mode,
+            "label": label,
+            "detail": detail,
+            "is_dual": mode == "dual",
+            "primary_fix_publishers": primary_fix_publishers,
+            "dual_heading_publishers": dual_heading_publishers,
+            "ublox_navheading_publishers": ublox_navheading_publishers,
+        }
+
     def get_datum_info(self) -> Dict[str, Any]:
         req = GetDatum.Request()
         res = self._call_service(self._nav_get_datum_client, req, self.request_timeout_s)
@@ -1212,6 +1291,7 @@ class WebZoneServerNode(Node):
         }
 
     def snapshot_state(self) -> Dict[str, Any]:
+        gps_mode = self._build_gps_mode_payload()
         with self._lock:
             return {
                 "op": "state",
@@ -1234,6 +1314,7 @@ class WebZoneServerNode(Node):
                 "recent_events": list(self._recent_nav_events),
                 "rosbag": self._build_rosbag_status_payload_locked(),
                 "camera_status": dict(self._camera_status),
+                "gps_mode": gps_mode,
             }
 
     def _build_nav_telemetry_payload(self) -> Dict[str, Any]:
@@ -1652,6 +1733,7 @@ class WebZoneServerNode(Node):
 
     def _on_nav_telemetry(self, msg: NavTelemetry) -> None:
         robot_pose_payload = None
+        robot_pose_changed = False
         with self._lock:
             self._cmd_vel_safe = {
                 "available": bool(msg.cmd_vel_available),
@@ -1676,18 +1758,25 @@ class WebZoneServerNode(Node):
                 "last_cmd_age_s": last_cmd_age,
             }
 
-            if np.isfinite(msg.robot_lat) and np.isfinite(msg.robot_lon):
+            if bool(getattr(msg, "robot_pose_available", False)) and np.isfinite(
+                msg.robot_lat
+            ) and np.isfinite(msg.robot_lon):
                 self._last_robot_pose = self._build_robot_pose(
                     lat=float(msg.robot_lat),
                     lon=float(msg.robot_lon),
                     heading_deg=self._last_robot_heading_deg,
                 )
                 robot_pose_payload = dict(self._last_robot_pose)
+                robot_pose_changed = True
+            elif self._last_robot_pose is not None:
+                self._last_robot_pose = None
+                robot_pose_payload = None
+                robot_pose_changed = True
 
         asyncio.run_coroutine_threadsafe(
             self._broadcast(self._build_nav_telemetry_payload()), self._loop
         )
-        if robot_pose_payload is not None:
+        if robot_pose_changed:
             asyncio.run_coroutine_threadsafe(
                 self._broadcast({"op": "robot_pose", "pose": robot_pose_payload}),
                 self._loop,
@@ -2076,6 +2165,8 @@ class WebZoneServerNode(Node):
         return True, ""
 
     def set_control_lock(self, locked: bool) -> Tuple[bool, str, bool]:
+        if SetControlLock is None or self._nav_set_control_lock_client is None:
+            return False, "set_control_lock service unavailable", bool(locked)
         req = SetControlLock.Request()
         req.locked = bool(locked)
         res = self._call_service(self._nav_set_control_lock_client, req, self.request_timeout_s)
@@ -2090,6 +2181,8 @@ class WebZoneServerNode(Node):
         return bool(res.ok), str(res.error), locked_after
 
     def touch_control_heartbeat(self) -> Tuple[bool, str, bool]:
+        if TouchControlHeartbeat is None or self._nav_touch_control_heartbeat_client is None:
+            return False, "control_heartbeat service unavailable", True
         req = TouchControlHeartbeat.Request()
         res = self._call_service(
             self._nav_touch_control_heartbeat_client,

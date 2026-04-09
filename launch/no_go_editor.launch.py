@@ -37,6 +37,7 @@ def generate_launch_description():
     nav_telemetry_topic = LaunchConfiguration("nav_telemetry_topic")
     camera_pan_service = LaunchConfiguration("camera_pan_service")
     camera_status_service = LaunchConfiguration("camera_status_service")
+    waypoints_file = LaunchConfiguration("waypoints_file")
     imu_topic = LaunchConfiguration("imu_topic")
     velocity_topic = LaunchConfiguration("velocity_topic")
     fix_type_topic = LaunchConfiguration("fix_type_topic")
@@ -125,6 +126,7 @@ def generate_launch_description():
                 "camera_status_service",
                 default_value="/camara/camera_status",
             ),
+            DeclareLaunchArgument("waypoints_file", default_value=""),
             DeclareLaunchArgument("imu_topic", default_value="/imu/data"),
             DeclareLaunchArgument("velocity_topic", default_value="/velocity"),
             DeclareLaunchArgument("fix_type_topic", default_value="/gps/fix_type"),
@@ -224,6 +226,7 @@ def generate_launch_description():
                         "nav_telemetry_topic": nav_telemetry_topic,
                         "camera_pan_service": camera_pan_service,
                         "camera_status_service": camera_status_service,
+                        "waypoints_file": waypoints_file,
                         "imu_topic": imu_topic,
                         "velocity_topic": velocity_topic,
                         "fix_type_topic": fix_type_topic,

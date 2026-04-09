@@ -1,9 +1,11 @@
 import asyncio
+import time
 import threading
 
 from diagnostic_msgs.msg import DiagnosticStatus
 from nav_msgs.msg import Odometry
 
+from interfaces.msg import NavTelemetry
 from map_tools.web_zone_server import (
     ROSBAG_TOPIC_PROFILES,
     SensorInfoSession,
@@ -104,6 +106,28 @@ class _FakeRemoveClientNode:
         return self.logger
 
 
+class _FakeGpsModeNode:
+    _build_gps_mode_payload = WebZoneServerNode._build_gps_mode_payload
+    _count_publishers_safe = WebZoneServerNode._count_publishers_safe
+
+    def __init__(
+        self,
+        *,
+        primary_fix_publishers: int = 0,
+        dual_heading_publishers: int = 0,
+        ublox_navheading_publishers: int = 0,
+    ) -> None:
+        self.gps_topic = "/gps/fix"
+        self._publisher_counts = {
+            "/gps/fix": int(primary_fix_publishers),
+            "/dual_gps/heading": int(dual_heading_publishers),
+            "/ublox_rover/navheading": int(ublox_navheading_publishers),
+        }
+
+    def count_publishers(self, topic_name: str) -> int:
+        return int(self._publisher_counts.get(str(topic_name), 0))
+
+
 def test_should_surface_diagnostic_accepts_navigation_errors():
     node = _FakeNode()
     status = _FakeStatus(
@@ -140,6 +164,19 @@ def test_rosbag_topics_for_profile_matches_declared_profiles():
     assert "/diagnostics" in topics
     assert "/nav_command_server/events" in topics
     assert _FakeNode._rosbag_topics_for_profile("missing") is None
+
+
+def test_rosbag_topics_for_sim_german_1gps_cover_replay_inputs() -> None:
+    topics = _FakeNode._rosbag_topics_for_profile("sim_german_1gps")
+
+    assert topics == ROSBAG_TOPIC_PROFILES["sim_german_1gps"]
+    assert "/clock" in topics
+    assert "/gps/fix_raw" in topics
+    assert "/imu/data_raw" in topics
+    assert "/scan_3d_raw" in topics
+    assert "/odom_raw" in topics
+    assert "/joint_states" in topics
+    assert "/controller/drive_telemetry" in topics
 
 
 def test_set_manual_cmd_publishes_when_manual_disabled() -> None:
@@ -198,6 +235,38 @@ def test_remove_client_locks_when_last_ws_client_disconnects() -> None:
     assert node.lock_requests == [True]
     assert node._ws_clients == set()
     assert node._sensor_info_sessions == {}
+
+
+def test_build_gps_mode_payload_prefers_dual_heading_publishers() -> None:
+    node = _FakeGpsModeNode(primary_fix_publishers=1, dual_heading_publishers=1)
+
+    payload = node._build_gps_mode_payload()
+
+    assert payload["mode"] == "dual"
+    assert payload["label"] == "2 GPS"
+    assert payload["is_dual"] is True
+    assert payload["dual_heading_publishers"] == 1
+
+
+def test_build_gps_mode_payload_reports_single_when_only_primary_fix_exists() -> None:
+    node = _FakeGpsModeNode(primary_fix_publishers=1)
+
+    payload = node._build_gps_mode_payload()
+
+    assert payload["mode"] == "single"
+    assert payload["label"] == "1 GPS"
+    assert payload["is_dual"] is False
+    assert payload["primary_fix_publishers"] == 1
+
+
+def test_build_gps_mode_payload_reports_unknown_without_gps_publishers() -> None:
+    node = _FakeGpsModeNode()
+
+    payload = node._build_gps_mode_payload()
+
+    assert payload["mode"] == "unknown"
+    assert payload["label"] == "GPS ?"
+    assert payload["is_dual"] is False
 
 
 class _FakeSetDatumRequest:
@@ -299,6 +368,59 @@ def test_robot_heading_updates_robot_pose_heading_from_odometry_global() -> None
     assert node._last_robot_heading_deg is not None
     assert abs(node._last_robot_heading_deg - 90.0) < 1.0e-3
     assert abs(node._last_robot_pose["heading_deg"] - 90.0) < 1.0e-3
+
+
+class _FakeNavTelemetryNode:
+    _build_robot_pose = WebZoneServerNode._build_robot_pose
+    _on_nav_telemetry = WebZoneServerNode._on_nav_telemetry
+
+    def __init__(self, loop) -> None:
+        self._lock = threading.Lock()
+        self._loop = loop
+        self._cmd_vel_safe = {}
+        self._goal_active = False
+        self._control_locked = False
+        self._control_lock_reason = ""
+        self._nav_result_status = 0
+        self._nav_result_text = "idle"
+        self._nav_result_event_id = 0
+        self._manual_cmd_last_monotonic = None
+        self._manual_control = {}
+        self._last_robot_heading_deg = 42.0
+        self._last_robot_pose = {"lat": -31.0, "lon": -64.0, "heading_deg": 42.0}
+        self.broadcasts = []
+
+    def _build_nav_telemetry_payload(self):
+        return {"op": "nav_telemetry"}
+
+    async def _broadcast(self, payload):
+        self.broadcasts.append(payload)
+
+
+def test_nav_telemetry_clears_robot_pose_when_backend_marks_pose_unavailable() -> None:
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+    try:
+        node = _FakeNavTelemetryNode(loop)
+        msg = NavTelemetry()
+        msg.robot_pose_available = False
+        msg.robot_lat = float("nan")
+        msg.robot_lon = float("nan")
+
+        node._on_nav_telemetry(msg)
+        time.sleep(0.05)
+
+        assert node._last_robot_pose is None
+        assert any(payload.get("op") == "nav_telemetry" for payload in node.broadcasts)
+        assert any(
+            payload.get("op") == "robot_pose" and payload.get("pose") is None
+            for payload in node.broadcasts
+        )
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(timeout=1.0)
+        loop.close()
 
 
 class _FakeSensorInfoNode:

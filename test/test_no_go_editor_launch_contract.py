@@ -53,6 +53,14 @@ def test_no_go_editor_launch_exposes_sensor_info_topics_for_web_gateway() -> Non
     assert '"nav_get_datum_service": nav_get_datum_service' in launch_contents
 
 
+def test_no_go_editor_launch_exposes_waypoints_file_override() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "no_go_editor.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("waypoints_file", default_value="")' in launch_contents
+    assert '"waypoints_file": waypoints_file' in launch_contents
+
+
 def test_no_go_editor_launch_exposes_control_lock_services() -> None:
     launch_path = Path(__file__).resolve().parents[1] / "launch" / "no_go_editor.launch.py"
     launch_contents = launch_path.read_text(encoding="utf-8")

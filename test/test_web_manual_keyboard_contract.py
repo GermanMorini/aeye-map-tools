@@ -90,6 +90,18 @@ def test_navigation_lock_ui_and_heartbeat_contract_are_present() -> None:
     assert 'id="navUnlockedControls"' not in contents
 
 
+def test_navigation_panel_exposes_gps_mode_indicator_contract() -> None:
+    index_path = Path(__file__).resolve().parents[1] / "web" / "index.html"
+    contents = index_path.read_text(encoding="utf-8")
+
+    assert 'id="gpsModeBtn"' in contents
+    assert "function normalizeGpsModePayload(payload) {" in contents
+    assert "function renderGpsModeButton() {" in contents
+    assert "function updateGpsMode(payload) {" in contents
+    assert "btn.textContent = `Modo: ${gpsMode.label}`;" in contents
+    assert "updateGpsMode(msg.gps_mode || null);" in contents
+
+
 def test_manual_disable_pending_contract_is_present() -> None:
     index_path = Path(__file__).resolve().parents[1] / "web" / "index.html"
     contents = index_path.read_text(encoding="utf-8")

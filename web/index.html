@@ -417,6 +417,13 @@
       border-color: #8a5100;
       color: #ffffff;
     }
+    button.read-only-indicator {
+      cursor: default;
+    }
+    button.read-only-indicator:hover:not(:disabled) {
+      filter: none;
+      transform: none;
+    }
     button:disabled {
       opacity: 0.6;
       cursor: not-allowed;
@@ -1412,6 +1419,9 @@
               <button id="manualModeBtn" class="secondary" title="modo manual (M) · OFF" aria-label="modo manual (M) · OFF">OFF</button>
             </div>
             <div class="row nav-loop-row">
+              <button id="gpsModeBtn" class="secondary read-only-indicator" type="button" title="Modo GPS actual" aria-label="Modo GPS actual">GPS: --</button>
+            </div>
+            <div class="row nav-loop-row">
               <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
                 <input id="goalLoop" type="checkbox" checked style="width:auto;" /> Loop route
               </label>
@@ -1609,8 +1619,8 @@
     const GPS_MAX_ZOOM = 26;
     const GPS_DEFAULT_ZOOM = GPS_NATIVE_MAX_ZOOM - 3;
     const map = L.map('map', { zoomControl: true }).setView(
-      [-31.421785, -64.102448],
-      GPS_DEFAULT_ZOOM
+      [0, 0],
+      2
     );
     const satelliteLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -1691,6 +1701,11 @@
         last_exit_code: null,
         last_error: '',
         available_profiles: ['core', 'full_nav2']
+      },
+      gpsMode: {
+        mode: 'unknown',
+        label: 'GPS ?',
+        detail: 'sin estado GPS'
       },
       cameraStatus: { ok: false, error: 'camera status unavailable', last_command: 'none', zoom_in: false },
       sensorInfo: {
@@ -2023,6 +2038,53 @@
       s.className = 'status';
       if (ok === true) s.classList.add('good');
       if (ok === false) s.classList.add('bad');
+    }
+
+    function normalizeGpsModePayload(payload) {
+      const mode = String(payload && payload.mode || '').trim().toLowerCase();
+      if (mode === 'dual') {
+        return {
+          mode: 'dual',
+          label: String(payload && payload.label || '2 GPS'),
+          detail: String(payload && payload.detail || 'dual heading detectado')
+        };
+      }
+      if (mode === 'single') {
+        return {
+          mode: 'single',
+          label: String(payload && payload.label || '1 GPS'),
+          detail: String(payload && payload.detail || 'solo GPS principal detectado')
+        };
+      }
+      return {
+        mode: 'unknown',
+        label: String(payload && payload.label || 'GPS ?'),
+        detail: String(payload && payload.detail || 'sin estado GPS')
+      };
+    }
+
+    function renderGpsModeButton() {
+      const btn = document.getElementById('gpsModeBtn');
+      if (!btn) return;
+      const gpsMode = normalizeGpsModePayload(state.gpsMode);
+      btn.textContent = `Modo: ${gpsMode.label}`;
+      btn.title = gpsMode.detail || 'Modo GPS actual';
+      btn.setAttribute('aria-label', btn.title);
+      btn.classList.remove('secondary', 'warning', 'success');
+      if (gpsMode.mode === 'dual') {
+        btn.classList.add('success');
+        return;
+      }
+      if (gpsMode.mode === 'single') {
+        btn.classList.add('warning');
+        return;
+      }
+      btn.classList.add('secondary');
+    }
+
+    function updateGpsMode(payload) {
+      state.gpsMode = normalizeGpsModePayload(payload);
+      renderGpsModeButton();
     }
 
     function snapshotFileExtensionFromMime(mime) {
@@ -4989,6 +5051,7 @@
         resetNavTelemetryState();
         state.manualControl.enabled = false;
         renderManualStatus();
+        updateGpsMode(null);
         if (getEffectiveConnectionConfig().cameraEnabled) {
           updateCameraStatusUi({ ok: false, error: 'disconnected', last_command: state.cameraStatus.last_command, zoom_in: state.cameraStatus.zoom_in });
         } else {
@@ -5052,6 +5115,7 @@
       resetNavTelemetryState();
       state.manualControl.enabled = false;
       renderManualStatus();
+      updateGpsMode(null);
     }
 
     function handleServerMessage(msg) {
@@ -5083,6 +5147,7 @@
         });
         updateRosbagState(msg.rosbag || null);
         syncManualControlFromServer(msg.manual_control || null);
+        updateGpsMode(msg.gps_mode || null);
         if (msg.camera_status) {
           updateCameraStatusUi(msg.camera_status);
         }
@@ -5372,6 +5437,7 @@
           icon: buildRobotIcon(headingDeg),
           interactive: false
         }).addTo(map);
+        map.setView(latLng, map.getZoom(), { animate: false });
       } else {
         state.robotMarker.setLatLng(latLng);
         state.robotMarker.setIcon(buildRobotIcon(headingDeg));
@@ -6284,6 +6350,7 @@
     applyConnectionPreset(state.connectionPreset, { saveCurrent: false });
     updateManualSliderLabels();
     renderManualStatus();
+    renderGpsModeButton();
     updateCameraStatusUi(state.cameraStatus);
     renderAlerts();
     renderRecentEvents();

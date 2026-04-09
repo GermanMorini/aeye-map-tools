@@ -73,6 +73,17 @@ def test_load_waypoints_yaml_file_missing(tmp_path: Path):
     assert waypoints == []
 
 
+def test_load_waypoints_yaml_file_accepts_empty_list(tmp_path: Path):
+    file_path = tmp_path / "saved_waypoints.yaml"
+    file_path.write_text("waypoints: []\n", encoding="utf-8")
+
+    ok, err, waypoints = load_waypoints_yaml_file(file_path)
+
+    assert ok
+    assert err == ""
+    assert waypoints == []
+
+
 def test_save_waypoints_yaml_file_rejects_empty(tmp_path: Path):
     file_path = tmp_path / "saved_waypoints.yaml"
     ok, err, count = save_waypoints_yaml_file(file_path, [])

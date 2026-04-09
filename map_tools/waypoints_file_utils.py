@@ -28,8 +28,16 @@ def normalize_waypoint(item: Any, index: int) -> Tuple[Optional[Dict[str, float]
     return {"lat": lat, "lon": lon, "yaw_deg": yaw}, ""
 
 
-def normalize_waypoints(waypoints_raw: Any) -> Tuple[Optional[List[Dict[str, float]]], str]:
-    if not isinstance(waypoints_raw, list) or len(waypoints_raw) == 0:
+def normalize_waypoints(
+    waypoints_raw: Any,
+    *,
+    allow_empty: bool = False,
+) -> Tuple[Optional[List[Dict[str, float]]], str]:
+    if not isinstance(waypoints_raw, list):
+        return None, "waypoints must be a list"
+    if len(waypoints_raw) == 0:
+        if allow_empty:
+            return [], ""
         return None, "waypoints must be a non-empty list"
 
     out: List[Dict[str, float]] = []
@@ -54,14 +62,18 @@ def build_waypoints_yaml_doc(waypoints: List[Dict[str, float]]) -> Dict[str, Any
     }
 
 
-def parse_waypoints_yaml_text(yaml_text: str) -> Tuple[Optional[List[Dict[str, float]]], str]:
+def parse_waypoints_yaml_text(
+    yaml_text: str,
+    *,
+    allow_empty: bool = False,
+) -> Tuple[Optional[List[Dict[str, float]]], str]:
     try:
         raw = yaml.safe_load(yaml_text)
     except Exception as exc:
         return None, f"invalid yaml: {exc}"
     if not isinstance(raw, dict):
         return None, "yaml root must be a map/object"
-    return normalize_waypoints(raw.get("waypoints"))
+    return normalize_waypoints(raw.get("waypoints"), allow_empty=allow_empty)
 
 
 def save_waypoints_yaml_file(
@@ -98,7 +110,7 @@ def load_waypoints_yaml_file(
     except Exception as exc:
         return False, f"failed reading waypoints file: {exc}", []
 
-    waypoints, err = parse_waypoints_yaml_text(raw_text)
+    waypoints, err = parse_waypoints_yaml_text(raw_text, allow_empty=True)
     if waypoints is None:
         return False, err, []
     return True, "", waypoints
