@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 
 from diagnostic_msgs.msg import DiagnosticStatus
@@ -7,6 +8,7 @@ from nav_msgs.msg import Odometry
 from map_tools.web_zone_server import (
     ROSBAG_TOPIC_PROFILES,
     SensorInfoSession,
+    WebSocketApi,
     WebZoneServerNode,
     _estimated_precision_for_fix,
     _fix_quality_class,
@@ -46,12 +48,16 @@ class _FakeLogger:
     def __init__(self) -> None:
         self.info_msgs = []
         self.warn_msgs = []
+        self.error_msgs = []
 
     def info(self, msg: str) -> None:
         self.info_msgs.append(str(msg))
 
     def warning(self, msg: str) -> None:
         self.warn_msgs.append(str(msg))
+
+    def error(self, msg: str) -> None:
+        self.error_msgs.append(str(msg))
 
 
 class _FakeManualNode:
@@ -461,3 +467,355 @@ def test_sensor_info_topics_session_creates_single_dynamic_subscription_per_sele
     assert subs_after_switch == 1
     assert len(node.destroyed) >= 1
     assert any(item[-1] is True for item in node.created)
+
+
+class _FakeWsNode:
+    _extract_client_req_id = staticmethod(WebSocketApi._extract_client_req_id)
+    _build_ack_payload = WebSocketApi._build_ack_payload
+
+    def __init__(self) -> None:
+        self.logger = _FakeLogger()
+        self.sent_payloads = []
+        self.get_processes_response = (
+            True,
+            "",
+            [
+                {
+                    "label": "healthcheck",
+                    "command": "./tools/healthcheck-lidar.sh",
+                    "cwd": "/ros2_ws",
+                    "running": False,
+                }
+            ],
+        )
+        self.reload_processes_response = (True, "")
+        self.start_process_response = (True, "")
+        self.start_process_calls = []
+
+    def get_logger(self):
+        return self.logger
+
+    async def send_ws_json(self, ws, payload):
+        self.sent_payloads.append((ws, dict(payload)))
+        return True
+
+    def get_processes_state(self):
+        return self.get_processes_response
+
+    def reload_processes_catalog(self):
+        return self.reload_processes_response
+
+    def start_process_ws(self, ws, process_label: str, output: bool, client_req_id):
+        self.start_process_calls.append((ws, process_label, output, client_req_id))
+        return self.start_process_response
+
+
+class _ImmediateFuture:
+    def __init__(self, result) -> None:
+        self._result = result
+
+    def done(self) -> bool:
+        return True
+
+    def result(self):
+        return self._result
+
+
+class _FakeResultFuture:
+    def __init__(self, result) -> None:
+        self._result = result
+        self._callback = None
+
+    def add_done_callback(self, callback) -> None:
+        self._callback = callback
+
+    def result(self):
+        return self._result
+
+    def fire(self) -> None:
+        assert self._callback is not None
+        self._callback(self)
+
+
+class _FakeGoalHandle:
+    def __init__(self, result) -> None:
+        self.accepted = True
+        self.result_future = _FakeResultFuture(result)
+
+    def get_result_async(self):
+        return self.result_future
+
+
+class _FakeActionClient:
+    def __init__(self, goal_handle) -> None:
+        self.goal_handle = goal_handle
+        self.sent_goals = []
+        self.feedback_callback = None
+
+    def wait_for_server(self, timeout_sec=None) -> bool:
+        _ = timeout_sec
+        return True
+
+    def send_goal_async(self, goal, feedback_callback=None):
+        self.sent_goals.append(goal)
+        self.feedback_callback = feedback_callback
+        return _ImmediateFuture(self.goal_handle)
+
+
+class _FakeProcessActionNode:
+    start_process_ws = WebZoneServerNode.start_process_ws
+    _on_process_feedback = WebZoneServerNode._on_process_feedback
+    _on_process_result = WebZoneServerNode._on_process_result
+
+    def __init__(self, action_client) -> None:
+        self._process_start_action_client = action_client
+        self.request_timeout_s = 5.0
+        self._loop = object()
+        self.logger = _FakeLogger()
+        self.sent_payloads = []
+
+    def get_logger(self):
+        return self.logger
+
+    def _wait_for_future(self, future, _timeout_s):
+        return future.result()
+
+    async def send_ws_json(self, ws, payload):
+        self.sent_payloads.append((ws, dict(payload)))
+        return True
+
+
+def test_process_state_item_to_payload_matches_contract() -> None:
+    item = type(
+        "Item",
+        (),
+        {
+            "process": type(
+                "Process",
+                (),
+                {
+                    "label": "healthcheck",
+                    "command": "./tools/healthcheck-lidar.sh",
+                    "cwd": "/ros2_ws",
+                },
+            )(),
+            "running": True,
+        },
+    )()
+
+    payload = WebZoneServerNode._process_state_item_to_payload(item)
+
+    assert payload == {
+        "label": "healthcheck",
+        "command": "./tools/healthcheck-lidar.sh",
+        "cwd": "/ros2_ws",
+        "running": True,
+    }
+
+
+async def _handle_ws_message(raw: str, node: _FakeWsNode):
+    api = WebSocketApi(node)
+    ws = object()
+    await api._handle_message(ws, raw)
+    return ws, node.sent_payloads, node.start_process_calls
+
+
+def test_ws_get_processes_returns_state_payload() -> None:
+    node = _FakeWsNode()
+
+    ws, sent_payloads, _ = asyncio.run(
+        _handle_ws_message(
+            json.dumps({"op": "get_processes", "client_req_id": "req-1"}),
+            node,
+        )
+    )
+
+    assert sent_payloads == [
+        (
+            ws,
+            {
+                "op": "process_executor_state",
+                "ok": True,
+                "process_list": [
+                    {
+                        "label": "healthcheck",
+                        "command": "./tools/healthcheck-lidar.sh",
+                        "cwd": "/ros2_ws",
+                        "running": False,
+                    }
+                ],
+                "client_req_id": "req-1",
+            },
+        )
+    ]
+
+
+def test_ws_reload_processes_returns_ack() -> None:
+    node = _FakeWsNode()
+
+    ws, sent_payloads, _ = asyncio.run(
+        _handle_ws_message(
+            json.dumps({"op": "reload_processes", "client_req_id": "req-2"}),
+            node,
+        )
+    )
+
+    assert sent_payloads == [
+        (
+            ws,
+            {
+                "op": "ack",
+                "ok": True,
+                "request": "reload_processes",
+                "error": None,
+                "client_req_id": "req-2",
+            },
+        )
+    ]
+
+
+def test_ws_start_process_returns_ack_and_passes_args() -> None:
+    node = _FakeWsNode()
+
+    ws, sent_payloads, start_calls = asyncio.run(
+        _handle_ws_message(
+            json.dumps(
+                {
+                    "op": "start_process",
+                    "client_req_id": "req-3",
+                    "process": "healthcheck",
+                    "output": True,
+                }
+            ),
+            node,
+        )
+    )
+
+    assert start_calls == [(ws, "healthcheck", True, "req-3")]
+    assert sent_payloads == [
+        (
+            ws,
+            {
+                "op": "ack",
+                "ok": True,
+                "request": "start_process",
+                "error": None,
+                "client_req_id": "req-3",
+            },
+        )
+    ]
+
+
+def test_ws_start_process_rejects_invalid_output_type() -> None:
+    node = _FakeWsNode()
+
+    ws, sent_payloads, start_calls = asyncio.run(
+        _handle_ws_message(
+            json.dumps(
+                {
+                    "op": "start_process",
+                    "client_req_id": "req-4",
+                    "process": "healthcheck",
+                    "output": "true",
+                }
+            ),
+            node,
+        )
+    )
+
+    assert start_calls == []
+    assert sent_payloads == [
+        (
+            ws,
+            {
+                "op": "ack",
+                "ok": False,
+                "request": "start_process",
+                "error": "output must be boolean",
+                "client_req_id": "req-4",
+            },
+        )
+    ]
+
+
+def test_start_process_ws_emits_feedback_and_finished_events(monkeypatch) -> None:
+    wrapped_result = type(
+        "Wrapped",
+        (),
+        {"result": type("Result", (), {"ok": True, "error": ""})()},
+    )()
+    goal_handle = _FakeGoalHandle(wrapped_result)
+    action_client = _FakeActionClient(goal_handle)
+    node = _FakeProcessActionNode(action_client)
+    ws = object()
+
+    def _run_now(coro, _loop):
+        _ = _loop
+        asyncio.run(coro)
+        return _ImmediateFuture(None)
+
+    monkeypatch.setattr(
+        WebZoneServerNode._on_process_feedback.__globals__["asyncio"],
+        "run_coroutine_threadsafe",
+        _run_now,
+    )
+
+    ok, err = node.start_process_ws(ws, "healthcheck", True, "req-5")
+
+    assert ok is True
+    assert err == ""
+    assert len(action_client.sent_goals) == 1
+    assert action_client.sent_goals[0].process == "healthcheck"
+    assert action_client.sent_goals[0].output is True
+    assert action_client.feedback_callback is not None
+
+    action_client.feedback_callback(
+        type(
+            "FeedbackMessage",
+            (),
+            {"feedback": type("Feedback", (), {"stream": "stdout", "data": "hola\n"})()},
+        )()
+    )
+    goal_handle.result_future.fire()
+
+    assert node.sent_payloads == [
+        (
+            ws,
+            {
+                "op": "process_output",
+                "process": "healthcheck",
+                "stream": "stdout",
+                "data": "hola\n",
+                "client_req_id": "req-5",
+            },
+        ),
+        (
+            ws,
+            {
+                "op": "process_finished",
+                "process": "healthcheck",
+                "ok": True,
+                "error": "",
+                "client_req_id": "req-5",
+            },
+        ),
+    ]
+
+
+def test_start_process_ws_disables_feedback_when_output_false() -> None:
+    wrapped_result = type(
+        "Wrapped",
+        (),
+        {"result": type("Result", (), {"ok": True, "error": ""})()},
+    )()
+    goal_handle = _FakeGoalHandle(wrapped_result)
+    action_client = _FakeActionClient(goal_handle)
+    node = _FakeProcessActionNode(action_client)
+
+    ok, err = node.start_process_ws(object(), "healthcheck", False, "req-6")
+
+    assert ok is True
+    assert err == ""
+    assert len(action_client.sent_goals) == 1
+    assert action_client.sent_goals[0].output is False
+    assert action_client.feedback_callback is None

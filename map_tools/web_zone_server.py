@@ -30,6 +30,7 @@ from std_msgs.msg import Float32, Int32, String
 from std_srvs.srv import Trigger
 import yaml
 
+from rclpy.action import ActionClient
 from rosidl_runtime_py.convert import message_to_ordereddict
 from rosidl_runtime_py.utilities import get_message
 
@@ -38,6 +39,7 @@ try:
 except ImportError:
     GPSRAW = None
 
+from interfaces.action import StartProcess
 from interfaces.msg import CmdVelFinal, NavEvent, NavTelemetry
 from interfaces.srv import (
     BrakeNav,
@@ -47,7 +49,9 @@ from interfaces.srv import (
     GetDatum,
     GetNavSnapshot,
     GetNavState,
+    GetProcesses,
     GetZonesState,
+    ReloadProcesses,
     SetControlLock,
     SetManualMode,
     SetNavGoalLL,
@@ -1044,6 +1048,11 @@ class WebZoneServerNode(Node):
         self._camera_status_client = self.create_client(
             CameraStatus, self.camera_status_service
         )
+        self._process_get_processes_client = self.create_client(GetProcesses, "get_processes")
+        self._process_reload_processes_client = self.create_client(
+            ReloadProcesses, "reload_processes"
+        )
+        self._process_start_action_client = ActionClient(self, StartProcess, "start_process")
         self.get_logger().info(
             "Web gateway ready "
             f"(ws={self.ws_host}:{self.ws_port}, zones_set={self.zones_set_geojson_service}, "
@@ -1235,6 +1244,16 @@ class WebZoneServerNode(Node):
                 "rosbag": self._build_rosbag_status_payload_locked(),
                 "camera_status": dict(self._camera_status),
             }
+
+    @staticmethod
+    def _process_state_item_to_payload(item: Any) -> Dict[str, Any]:
+        process = getattr(item, "process", None)
+        return {
+            "label": str(getattr(process, "label", "") or ""),
+            "command": str(getattr(process, "command", "") or ""),
+            "cwd": str(getattr(process, "cwd", "") or ""),
+            "running": bool(getattr(item, "running", False)),
+        }
 
     def _build_nav_telemetry_payload(self) -> Dict[str, Any]:
         with self._lock:
@@ -1745,6 +1764,127 @@ class WebZoneServerNode(Node):
                 f"Service timeout: {service_name} (request={request_name}, timeout_s={timeout_s:.2f})"
             )
         return result
+
+    def get_processes_state(self) -> Tuple[bool, str, List[Dict[str, Any]]]:
+        req = GetProcesses.Request()
+        res = self._call_service(
+            self._process_get_processes_client,
+            req,
+            self.request_timeout_s,
+        )
+        if res is None:
+            return False, "get_processes timeout", []
+        process_list = [
+            self._process_state_item_to_payload(item)
+            for item in list(getattr(res, "process_list", []) or [])
+        ]
+        return True, "", process_list
+
+    def reload_processes_catalog(self) -> Tuple[bool, str]:
+        req = ReloadProcesses.Request()
+        res = self._call_service(
+            self._process_reload_processes_client,
+            req,
+            self.request_timeout_s,
+        )
+        if res is None:
+            return False, "reload_processes timeout"
+        ok = bool(getattr(res, "ok", False))
+        error = str(getattr(res, "error", "") or "")
+        return ok, error
+
+    def start_process_ws(
+        self,
+        ws: Any,
+        process_label: str,
+        output: bool,
+        client_req_id: Optional[str],
+    ) -> Tuple[bool, str]:
+        if not self._process_start_action_client.wait_for_server(
+            timeout_sec=min(self.request_timeout_s, 2.0)
+        ):
+            self.get_logger().warning("Action unavailable: start_process")
+            return False, "start_process unavailable"
+
+        goal = StartProcess.Goal()
+        goal.process = str(process_label)
+        goal.output = bool(output)
+        feedback_callback = None
+        if output:
+            feedback_callback = (
+                lambda feedback_msg: self._on_process_feedback(
+                    ws,
+                    process_label,
+                    client_req_id,
+                    feedback_msg,
+                )
+            )
+        future = self._process_start_action_client.send_goal_async(
+            goal,
+            feedback_callback=feedback_callback,
+        )
+        goal_handle = self._wait_for_future(future, self.request_timeout_s)
+        if goal_handle is None:
+            self.get_logger().warning("Action timeout: start_process")
+            return False, "start_process timeout"
+        if not bool(getattr(goal_handle, "accepted", False)):
+            return False, "start_process rejected"
+
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            lambda done: self._on_process_result(
+                ws,
+                process_label,
+                client_req_id,
+                done,
+            )
+        )
+        return True, ""
+
+    def _on_process_feedback(
+        self,
+        ws: Any,
+        process_label: str,
+        client_req_id: Optional[str],
+        feedback_msg: Any,
+    ) -> None:
+        feedback = getattr(feedback_msg, "feedback", feedback_msg)
+        payload: Dict[str, Any] = {
+            "op": "process_output",
+            "process": str(process_label),
+            "stream": str(getattr(feedback, "stream", "") or ""),
+            "data": str(getattr(feedback, "data", "") or ""),
+        }
+        if client_req_id is not None:
+            payload["client_req_id"] = client_req_id
+        asyncio.run_coroutine_threadsafe(self.send_ws_json(ws, payload), self._loop)
+
+    def _on_process_result(
+        self,
+        ws: Any,
+        process_label: str,
+        client_req_id: Optional[str],
+        future: Any,
+    ) -> None:
+        ok = False
+        error = "start_process failed"
+        try:
+            wrapped_result = future.result()
+            result = getattr(wrapped_result, "result", wrapped_result)
+            ok = bool(getattr(result, "ok", False))
+            error = str(getattr(result, "error", "") or "")
+        except Exception as exc:
+            error = f"start_process failed: {exc}"
+
+        payload: Dict[str, Any] = {
+            "op": "process_finished",
+            "process": str(process_label),
+            "ok": ok,
+            "error": error,
+        }
+        if client_req_id is not None:
+            payload["client_req_id"] = client_req_id
+        asyncio.run_coroutine_threadsafe(self.send_ws_json(ws, payload), self._loop)
 
     def _resolve_waypoints_file(self, configured_path: str) -> Path:
         if configured_path:
@@ -2414,6 +2554,68 @@ class WebSocketApi:
             if client_req_id is not None:
                 payload["client_req_id"] = client_req_id
             await self._send_json(ws, payload)
+            return
+
+        if op == "get_processes":
+            ok, err, process_list = await asyncio.to_thread(self.node.get_processes_state)
+            payload: Dict[str, Any] = {
+                "op": "process_executor_state",
+                "ok": bool(ok),
+                "process_list": list(process_list),
+            }
+            if not ok:
+                payload["error"] = str(err)
+            if client_req_id is not None:
+                payload["client_req_id"] = client_req_id
+            await self._send_json(ws, payload)
+            return
+
+        if op == "reload_processes":
+            ok, err = await asyncio.to_thread(self.node.reload_processes_catalog)
+            await self._send_ack(
+                ws,
+                "reload_processes",
+                ok,
+                err,
+                client_req_id=client_req_id,
+            )
+            return
+
+        if op == "start_process":
+            process_label = str(msg.get("process", "") or "").strip()
+            output_raw = msg.get("output", False)
+            if not process_label:
+                await self._send_ack(
+                    ws,
+                    "start_process",
+                    False,
+                    "process field is required",
+                    client_req_id=client_req_id,
+                )
+                return
+            if not isinstance(output_raw, bool):
+                await self._send_ack(
+                    ws,
+                    "start_process",
+                    False,
+                    "output must be boolean",
+                    client_req_id=client_req_id,
+                )
+                return
+            ok, err = await asyncio.to_thread(
+                self.node.start_process_ws,
+                ws,
+                process_label,
+                output_raw,
+                client_req_id,
+            )
+            await self._send_ack(
+                ws,
+                "start_process",
+                ok,
+                err,
+                client_req_id=client_req_id,
+            )
             return
 
         if op == "set_zones_geojson":
