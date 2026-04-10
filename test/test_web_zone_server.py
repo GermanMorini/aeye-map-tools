@@ -490,7 +490,9 @@ class _FakeWsNode:
         )
         self.reload_processes_response = (True, "")
         self.start_process_response = (True, "")
+        self.stop_process_response = (True, "")
         self.start_process_calls = []
+        self.stop_process_calls = []
 
     def get_logger(self):
         return self.logger
@@ -508,6 +510,10 @@ class _FakeWsNode:
     def start_process_ws(self, ws, process_label: str, output: bool, client_req_id):
         self.start_process_calls.append((ws, process_label, output, client_req_id))
         return self.start_process_response
+
+    def stop_process_ws(self, ws, process_label: str, client_req_id):
+        self.stop_process_calls.append((ws, process_label, client_req_id))
+        return self.stop_process_response
 
 
 class _ImmediateFuture:
@@ -538,12 +544,21 @@ class _FakeResultFuture:
 
 
 class _FakeGoalHandle:
-    def __init__(self, result) -> None:
+    def __init__(self, result, cancel_response=None) -> None:
         self.accepted = True
         self.result_future = _FakeResultFuture(result)
+        self.cancel_calls = 0
+        self.cancel_response = cancel_response
 
     def get_result_async(self):
         return self.result_future
+
+    def cancel_goal_async(self):
+        self.cancel_calls += 1
+        response = self.cancel_response
+        if response is None:
+            response = type("CancelResponse", (), {"goals_canceling": [object()]})()
+        return _ImmediateFuture(response)
 
 
 class _FakeActionClient:
@@ -564,21 +579,31 @@ class _FakeActionClient:
 
 class _FakeProcessActionNode:
     start_process_ws = WebZoneServerNode.start_process_ws
+    stop_process_ws = WebZoneServerNode.stop_process_ws
     _on_process_feedback = WebZoneServerNode._on_process_feedback
     _on_process_result = WebZoneServerNode._on_process_result
+    _register_active_process_request = WebZoneServerNode._register_active_process_request
+    _process_stop_unavailable_error = WebZoneServerNode._process_stop_unavailable_error
+    _process_result_was_cancelled = staticmethod(WebZoneServerNode._process_result_was_cancelled)
 
     def __init__(self, action_client) -> None:
+        self._lock = threading.Lock()
+        self._active_process_requests = {}
         self._process_start_action_client = action_client
         self.request_timeout_s = 5.0
         self._loop = object()
         self.logger = _FakeLogger()
         self.sent_payloads = []
+        self.get_processes_response = (True, "", [])
 
     def get_logger(self):
         return self.logger
 
     def _wait_for_future(self, future, _timeout_s):
         return future.result()
+
+    def get_processes_state(self):
+        return self.get_processes_response
 
     async def send_ws_json(self, ws, payload):
         self.sent_payloads.append((ws, dict(payload)))
@@ -617,13 +642,13 @@ async def _handle_ws_message(raw: str, node: _FakeWsNode):
     api = WebSocketApi(node)
     ws = object()
     await api._handle_message(ws, raw)
-    return ws, node.sent_payloads, node.start_process_calls
+    return ws, node.sent_payloads, node.start_process_calls, node.stop_process_calls
 
 
 def test_ws_get_processes_returns_state_payload() -> None:
     node = _FakeWsNode()
 
-    ws, sent_payloads, _ = asyncio.run(
+    ws, sent_payloads, _, _ = asyncio.run(
         _handle_ws_message(
             json.dumps({"op": "get_processes", "client_req_id": "req-1"}),
             node,
@@ -653,7 +678,7 @@ def test_ws_get_processes_returns_state_payload() -> None:
 def test_ws_reload_processes_returns_ack() -> None:
     node = _FakeWsNode()
 
-    ws, sent_payloads, _ = asyncio.run(
+    ws, sent_payloads, _, _ = asyncio.run(
         _handle_ws_message(
             json.dumps({"op": "reload_processes", "client_req_id": "req-2"}),
             node,
@@ -677,7 +702,7 @@ def test_ws_reload_processes_returns_ack() -> None:
 def test_ws_start_process_returns_ack_and_passes_args() -> None:
     node = _FakeWsNode()
 
-    ws, sent_payloads, start_calls = asyncio.run(
+    ws, sent_payloads, start_calls, stop_calls = asyncio.run(
         _handle_ws_message(
             json.dumps(
                 {
@@ -692,6 +717,7 @@ def test_ws_start_process_returns_ack_and_passes_args() -> None:
     )
 
     assert start_calls == [(ws, "healthcheck", True, "req-3")]
+    assert stop_calls == []
     assert sent_payloads == [
         (
             ws,
@@ -709,7 +735,7 @@ def test_ws_start_process_returns_ack_and_passes_args() -> None:
 def test_ws_start_process_rejects_invalid_output_type() -> None:
     node = _FakeWsNode()
 
-    ws, sent_payloads, start_calls = asyncio.run(
+    ws, sent_payloads, start_calls, stop_calls = asyncio.run(
         _handle_ws_message(
             json.dumps(
                 {
@@ -724,6 +750,7 @@ def test_ws_start_process_rejects_invalid_output_type() -> None:
     )
 
     assert start_calls == []
+    assert stop_calls == []
     assert sent_payloads == [
         (
             ws,
@@ -733,6 +760,69 @@ def test_ws_start_process_rejects_invalid_output_type() -> None:
                 "request": "start_process",
                 "error": "output must be boolean",
                 "client_req_id": "req-4",
+            },
+        )
+    ]
+
+
+def test_ws_stop_process_returns_ack_and_passes_args() -> None:
+    node = _FakeWsNode()
+
+    ws, sent_payloads, start_calls, stop_calls = asyncio.run(
+        _handle_ws_message(
+            json.dumps(
+                {
+                    "op": "stop_process",
+                    "client_req_id": "req-stop-1",
+                    "process": "healthcheck",
+                }
+            ),
+            node,
+        )
+    )
+
+    assert start_calls == []
+    assert stop_calls == [(ws, "healthcheck", "req-stop-1")]
+    assert sent_payloads == [
+        (
+            ws,
+            {
+                "op": "ack",
+                "ok": True,
+                "request": "stop_process",
+                "error": None,
+                "client_req_id": "req-stop-1",
+            },
+        )
+    ]
+
+
+def test_ws_stop_process_requires_process_field() -> None:
+    node = _FakeWsNode()
+
+    ws, sent_payloads, start_calls, stop_calls = asyncio.run(
+        _handle_ws_message(
+            json.dumps(
+                {
+                    "op": "stop_process",
+                    "client_req_id": "req-stop-2",
+                }
+            ),
+            node,
+        )
+    )
+
+    assert start_calls == []
+    assert stop_calls == []
+    assert sent_payloads == [
+        (
+            ws,
+            {
+                "op": "ack",
+                "ok": False,
+                "request": "stop_process",
+                "error": "process field is required",
+                "client_req_id": "req-stop-2",
             },
         )
     ]
@@ -819,3 +909,148 @@ def test_start_process_ws_disables_feedback_when_output_false() -> None:
     assert len(action_client.sent_goals) == 1
     assert action_client.sent_goals[0].output is False
     assert action_client.feedback_callback is None
+
+
+def test_stop_process_ws_rejects_unknown_label() -> None:
+    wrapped_result = type(
+        "Wrapped",
+        (),
+        {"result": type("Result", (), {"ok": True, "error": ""})()},
+    )()
+    goal_handle = _FakeGoalHandle(wrapped_result)
+    action_client = _FakeActionClient(goal_handle)
+    node = _FakeProcessActionNode(action_client)
+    node.get_processes_response = (True, "", [])
+
+    ok, err = node.stop_process_ws(object(), "healthcheck", "req-stop-3")
+
+    assert ok is False
+    assert err == "unknown process: healthcheck"
+    assert goal_handle.cancel_calls == 0
+
+
+def test_stop_process_ws_rejects_process_not_running() -> None:
+    wrapped_result = type(
+        "Wrapped",
+        (),
+        {"result": type("Result", (), {"ok": True, "error": ""})()},
+    )()
+    goal_handle = _FakeGoalHandle(wrapped_result)
+    action_client = _FakeActionClient(goal_handle)
+    node = _FakeProcessActionNode(action_client)
+    node.get_processes_response = (
+        True,
+        "",
+        [
+            {
+                "label": "healthcheck",
+                "command": "./tools/healthcheck-lidar.sh",
+                "cwd": "/ros2_ws",
+                "running": False,
+            }
+        ],
+    )
+
+    ok, err = node.stop_process_ws(object(), "healthcheck", "req-stop-4")
+
+    assert ok is False
+    assert err == "process not running: healthcheck"
+    assert goal_handle.cancel_calls == 0
+
+
+def test_stop_process_ws_cancels_goal_and_reroutes_finished_event(monkeypatch) -> None:
+    wrapped_result = type(
+        "Wrapped",
+        (),
+        {
+            "status": 5,
+            "result": type("Result", (), {"ok": False, "error": "cancelled"})(),
+        },
+    )()
+    goal_handle = _FakeGoalHandle(wrapped_result)
+    action_client = _FakeActionClient(goal_handle)
+    node = _FakeProcessActionNode(action_client)
+    starter_ws = object()
+    stopper_ws = object()
+
+    def _run_now(coro, _loop):
+        _ = _loop
+        asyncio.run(coro)
+        return _ImmediateFuture(None)
+
+    monkeypatch.setattr(
+        WebZoneServerNode._on_process_result.__globals__["asyncio"],
+        "run_coroutine_threadsafe",
+        _run_now,
+    )
+
+    ok, err = node.start_process_ws(starter_ws, "healthcheck", False, "req-start")
+
+    assert ok is True
+    assert err == ""
+
+    ok, err = node.stop_process_ws(stopper_ws, "healthcheck", "req-stop-5")
+
+    assert ok is True
+    assert err == ""
+    assert goal_handle.cancel_calls == 1
+
+    goal_handle.result_future.fire()
+
+    assert node.sent_payloads == [
+        (
+            stopper_ws,
+            {
+                "op": "process_finished",
+                "process": "healthcheck",
+                "ok": True,
+                "client_req_id": "req-stop-5",
+            },
+        )
+    ]
+    assert node._active_process_requests == {}
+
+
+def test_stop_process_ws_emits_failure_when_result_is_not_cancelled(monkeypatch) -> None:
+    wrapped_result = type(
+        "Wrapped",
+        (),
+        {
+            "status": 6,
+            "result": type("Result", (), {"ok": False, "error": "process exited with code 7"})(),
+        },
+    )()
+    goal_handle = _FakeGoalHandle(wrapped_result)
+    action_client = _FakeActionClient(goal_handle)
+    node = _FakeProcessActionNode(action_client)
+    starter_ws = object()
+    stopper_ws = object()
+
+    def _run_now(coro, _loop):
+        _ = _loop
+        asyncio.run(coro)
+        return _ImmediateFuture(None)
+
+    monkeypatch.setattr(
+        WebZoneServerNode._on_process_result.__globals__["asyncio"],
+        "run_coroutine_threadsafe",
+        _run_now,
+    )
+
+    assert node.start_process_ws(starter_ws, "healthcheck", False, "req-start-2") == (True, "")
+    assert node.stop_process_ws(stopper_ws, "healthcheck", "req-stop-6") == (True, "")
+
+    goal_handle.result_future.fire()
+
+    assert node.sent_payloads == [
+        (
+            stopper_ws,
+            {
+                "op": "process_finished",
+                "process": "healthcheck",
+                "ok": False,
+                "error": "process exited with code 7",
+                "client_req_id": "req-stop-6",
+            },
+        )
+    ]

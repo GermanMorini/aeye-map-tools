@@ -2,6 +2,7 @@ import asyncio
 import base64
 from collections import deque
 import contextlib
+from dataclasses import dataclass
 import json
 import math
 import os
@@ -129,6 +130,16 @@ TOPICS_HISTORY_MAX_MESSAGES = 200
 TOPICS_HISTORY_MAX_TEXT_BYTES = 512 * 1024
 TOPICS_MAX_ARRAY_ITEMS = 100
 TOPICS_MAX_BYTES_PREVIEW = 256
+PROCESS_STATUS_CANCELED = 5
+
+
+@dataclass
+class ActiveProcessRequest:
+    goal_handle: Any
+    output_ws: Any
+    finish_ws: Any
+    finish_client_req_id: Optional[str]
+    stop_requested: bool = False
 
 
 def _stamp_to_dict(stamp: Any) -> Dict[str, int]:
@@ -947,6 +958,7 @@ class WebZoneServerNode(Node):
         self._ws_clients: Set[Any] = set()
         self._ws_send_locks: Dict[Any, asyncio.Lock] = {}
         self._sensor_info_sessions: Dict[Any, SensorInfoSession] = {}
+        self._active_process_requests: Dict[str, ActiveProcessRequest] = {}
 
         self._last_robot_pose: Optional[Dict[str, float]] = None
         self._last_robot_heading_deg: Optional[float] = None
@@ -1830,15 +1842,54 @@ class WebZoneServerNode(Node):
         if not bool(getattr(goal_handle, "accepted", False)):
             return False, "start_process rejected"
 
+        self._register_active_process_request(
+            process_label,
+            goal_handle,
+            ws,
+            client_req_id,
+        )
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
             lambda done: self._on_process_result(
                 ws,
                 process_label,
                 client_req_id,
+                goal_handle,
                 done,
             )
         )
+        return True, ""
+
+    def stop_process_ws(
+        self,
+        ws: Any,
+        process_label: str,
+        client_req_id: Optional[str],
+    ) -> Tuple[bool, str]:
+        with self._lock:
+            active_request = self._active_process_requests.get(process_label)
+
+        if active_request is None:
+            return False, self._process_stop_unavailable_error(process_label)
+        if active_request.stop_requested:
+            return False, f"process stop already requested: {process_label}"
+
+        cancel_future = active_request.goal_handle.cancel_goal_async()
+        cancel_response = self._wait_for_future(cancel_future, self.request_timeout_s)
+        if cancel_response is None:
+            return False, "stop_process timeout"
+
+        goals_canceling = getattr(cancel_response, "goals_canceling", None)
+        if goals_canceling is not None and len(list(goals_canceling or [])) == 0:
+            return False, f"process stop rejected: {process_label}"
+
+        with self._lock:
+            current = self._active_process_requests.get(process_label)
+            if current is None or current.goal_handle is not active_request.goal_handle:
+                return False, f"process not running: {process_label}"
+            current.finish_ws = ws
+            current.finish_client_req_id = client_req_id
+            current.stop_requested = True
         return True, ""
 
     def _on_process_feedback(
@@ -1864,27 +1915,90 @@ class WebZoneServerNode(Node):
         ws: Any,
         process_label: str,
         client_req_id: Optional[str],
+        goal_handle: Any,
         future: Any,
     ) -> None:
         ok = False
         error = "start_process failed"
+        result_status = 0
         try:
             wrapped_result = future.result()
+            result_status = int(getattr(wrapped_result, "status", 0) or 0)
             result = getattr(wrapped_result, "result", wrapped_result)
             ok = bool(getattr(result, "ok", False))
             error = str(getattr(result, "error", "") or "")
         except Exception as exc:
             error = f"start_process failed: {exc}"
+            wrapped_result = None
+            result = None
+
+        finish_ws = ws
+        finish_client_req_id = client_req_id
+        stop_requested = False
+        with self._lock:
+            active_request = self._active_process_requests.get(process_label)
+            if active_request is not None and active_request.goal_handle is goal_handle:
+                self._active_process_requests.pop(process_label, None)
+                finish_ws = active_request.finish_ws
+                finish_client_req_id = active_request.finish_client_req_id
+                stop_requested = active_request.stop_requested
 
         payload: Dict[str, Any] = {
             "op": "process_finished",
             "process": str(process_label),
-            "ok": ok,
-            "error": error,
         }
-        if client_req_id is not None:
-            payload["client_req_id"] = client_req_id
-        asyncio.run_coroutine_threadsafe(self.send_ws_json(ws, payload), self._loop)
+        if finish_client_req_id is not None:
+            payload["client_req_id"] = finish_client_req_id
+        if stop_requested and self._process_result_was_cancelled(result_status, result, error):
+            payload["ok"] = True
+        else:
+            payload["ok"] = ok
+            if stop_requested:
+                if not ok:
+                    payload["error"] = error
+            else:
+                payload["error"] = error
+        asyncio.run_coroutine_threadsafe(self.send_ws_json(finish_ws, payload), self._loop)
+
+    def _register_active_process_request(
+        self,
+        process_label: str,
+        goal_handle: Any,
+        ws: Any,
+        client_req_id: Optional[str],
+    ) -> None:
+        with self._lock:
+            if process_label in self._active_process_requests:
+                return
+            self._active_process_requests[process_label] = ActiveProcessRequest(
+                goal_handle=goal_handle,
+                output_ws=ws,
+                finish_ws=ws,
+                finish_client_req_id=client_req_id,
+            )
+
+    def _process_stop_unavailable_error(self, process_label: str) -> str:
+        ok, _, process_list = self.get_processes_state()
+        if ok:
+            for item in process_list:
+                if str(item.get("label", "")) != process_label:
+                    continue
+                if bool(item.get("running", False)):
+                    return f"process not stoppable: {process_label}"
+                return f"process not running: {process_label}"
+            return f"unknown process: {process_label}"
+        return f"process not running: {process_label}"
+
+    @staticmethod
+    def _process_result_was_cancelled(
+        result_status: int,
+        result: Any,
+        error: str,
+    ) -> bool:
+        if int(result_status) == PROCESS_STATUS_CANCELED:
+            return True
+        result_error = str(getattr(result, "error", "") or error or "")
+        return result_error == "cancelled"
 
     def _resolve_waypoints_file(self, configured_path: str) -> Path:
         if configured_path:
@@ -2612,6 +2726,32 @@ class WebSocketApi:
             await self._send_ack(
                 ws,
                 "start_process",
+                ok,
+                err,
+                client_req_id=client_req_id,
+            )
+            return
+
+        if op == "stop_process":
+            process_label = str(msg.get("process", "") or "").strip()
+            if not process_label:
+                await self._send_ack(
+                    ws,
+                    "stop_process",
+                    False,
+                    "process field is required",
+                    client_req_id=client_req_id,
+                )
+                return
+            ok, err = await asyncio.to_thread(
+                self.node.stop_process_ws,
+                ws,
+                process_label,
+                client_req_id,
+            )
+            await self._send_ack(
+                ws,
+                "stop_process",
                 ok,
                 err,
                 client_req_id=client_req_id,
